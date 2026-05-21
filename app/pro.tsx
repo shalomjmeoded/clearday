@@ -64,7 +64,7 @@ export default function ProScreen() {
           ) : null}
 
           <Text style={[typography.heroTitle, styles.title, { color: tokens.text }]}>
-            Make it yours.
+            Make Do! yours.
           </Text>
           <Text style={[typography.body, styles.subtitle, { color: tokens.mutedText }]}>
             Unlock unlimited lists, recurring tasks, advanced reminders, widgets, premium

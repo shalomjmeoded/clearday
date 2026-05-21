@@ -1,18 +1,21 @@
 /** What every user gets in the MVP. */
 export const FREE_PLAN_FEATURES = [
   'Today list',
-  'Tomorrow & Later',
+  'All list',
+  'Tomorrow/Later',
   'Focus Mode',
   'Basic reminders',
-  'One custom list (+ Inbox)',
-  'Light, dark & system theme',
+  'One custom list',
+  'Light/dark/system theme',
   'Local storage',
-  'Done history',
-  'Privacy-first: tasks stay on phone',
+  'Finished tasks',
+  '0 ads',
+  'Private on-device task storage',
 ] as const;
 
 /** Pro unlocks everything in Free, plus: */
 export const PRO_INCLUDED_FEATURES = [
+  'Everything in Free',
   'Unlimited lists',
   'Recurring tasks',
   'Advanced reminders',
@@ -23,7 +26,7 @@ export const PRO_INCLUDED_FEATURES = [
   'Future cloud sync',
   'Shared lists',
   'Voice capture',
-  'Smarter task parsing',
+  'Smarter parsing',
   'Completion insights',
 ] as const;
 

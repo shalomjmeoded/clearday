@@ -128,7 +128,7 @@ export default function SettingsScreen() {
 
         <SettingsGroup title="Pro">
           <SettingsRow
-            label={isPro ? 'ClearDay Pro' : 'Upgrade to Pro'}
+            label={isPro ? 'Do! Pro' : 'Upgrade to Pro'}
             value={isPro ? 'Active' : undefined}
             onPress={() => router.push('/pro')}
           />

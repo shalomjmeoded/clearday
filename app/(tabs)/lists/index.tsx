@@ -52,7 +52,7 @@ export default function ListsScreen() {
 
   const promptUpgrade = () => {
     Alert.alert(
-      'ClearDay Pro',
+      'Do! Pro',
       'Free includes one custom list. Upgrade for unlimited lists.',
       [
         { text: 'Not now', style: 'cancel' },

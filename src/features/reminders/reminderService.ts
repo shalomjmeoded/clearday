@@ -109,7 +109,7 @@ export async function scheduleReminderForTask(task: Task): Promise<void> {
 
     const notificationId = await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'ClearDay',
+        title: 'Do!',
         body: task.title,
         data: { taskId: task.id },
       },

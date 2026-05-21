@@ -1,0 +1,12 @@
+<svg width="1290" height="2796" viewBox="0 0 1290 2796" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1290" height="2796" fill="#111820"/>
+  <g transform="translate(445.0 850)">
+    <rect x="0" y="0" width="400" height="400" rx="96" fill="#171E27" stroke="#252B33" stroke-width="6"/>
+    <text x="188" y="255" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="170" letter-spacing="-10" fill="#F4EEE5">Do</text>
+    <text x="315" y="255" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="170" fill="#C8755D">!</text>
+  </g>
+  <text x="595.0" y="1550" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="250" letter-spacing="-12" fill="#F4EEE5">Do</text>
+  <text x="890.0" y="1550" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="250" fill="#C8755D">!</text>
+  <line x1="580.0" y1="1665" x2="710.0" y2="1665" stroke="#C8755D" stroke-width="8" stroke-linecap="round"/>
+  <text x="645.0" y="1765" text-anchor="middle" font-family="Inter, Avenir, Helvetica, Arial, sans-serif" font-size="42" letter-spacing="4" fill="#F4EEE5">minimalist, private Todo list app</text>
+</svg>

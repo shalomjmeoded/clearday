@@ -488,7 +488,7 @@ export default function TodayScreen() {
           onPress={() => setAdding(true)}
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: '#4F8EEB' },
+            { backgroundColor: tokens.accent },
             pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
           ]}
         >

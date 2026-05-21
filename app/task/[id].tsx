@@ -524,7 +524,7 @@ export default function TaskDetailScreen() {
                   onPress={async () => {
                     if (option.key !== 'none' && !isPro) {
                       Alert.alert(
-                        'ClearDay Pro',
+                        'Do! Pro',
                         'Recurring tasks are included with Pro.',
                         [
                           { text: 'Not now', style: 'cancel' },

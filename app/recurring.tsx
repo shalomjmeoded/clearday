@@ -31,7 +31,7 @@ export default function RecurringTasksScreen() {
               Recurring Tasks
             </Text>
             <Text style={[typography.body, styles.body, { color: tokens.mutedText }]}>
-              Create daily, weekly, and monthly tasks automatically with ClearDay Pro.
+              Create daily, weekly, and monthly tasks automatically with Do! Pro.
             </Text>
             <PrimaryButton label="View Pro" onPress={() => router.push('/pro')} />
           </View>

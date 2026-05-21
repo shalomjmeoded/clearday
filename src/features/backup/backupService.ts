@@ -199,7 +199,7 @@ export async function exportBackupToFile(): Promise<void> {
 
   await Sharing.shareAsync(uri, {
     mimeType: 'application/json',
-    dialogTitle: 'Export ClearDay backup',
+    dialogTitle: 'Export Do! backup',
     UTI: 'public.json',
   });
 }

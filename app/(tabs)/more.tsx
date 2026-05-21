@@ -75,8 +75,8 @@ export default function MoreScreen() {
         <LinkRow label="Help" onPress={() => open('/help')} />
         <LinkRow label="Settings" onPress={() => open('/settings')} />
         <LinkRow
-          label="ClearDay Pro"
-          subtitle={isPro ? 'Pro active' : 'Make it yours.'}
+          label="Do! Pro"
+          subtitle={isPro ? 'Pro active' : 'Make Do! yours.'}
           onPress={() => open('/pro')}
           last
         />

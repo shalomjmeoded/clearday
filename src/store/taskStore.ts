@@ -284,7 +284,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     if (!isPro) {
       Alert.alert(
-        'ClearDay Pro',
+        'Do! Pro',
         'Recurring tasks are included with Pro.',
         [
           { text: 'Not now', style: 'cancel' },

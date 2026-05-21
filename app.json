@@ -1,17 +1,17 @@
 {
   "expo": {
-    "name": "ClearDay",
-    "slug": "clearday",
+    "name": "Do!",
+    "slug": "do-private-todo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "clearday",
+    "scheme": "do-private-todo",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F6F3ED"
+      "backgroundColor": "#F6F1E8"
     },
     "ios": {
       "supportsTablet": false,
@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#F6F3ED"
+        "backgroundColor": "#F6F1E8"
       },
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "resize",
@@ -33,12 +33,25 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F6F1E8",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#111820",
+            "image": "./assets/images/splash-icon-dark.png"
+          }
+        }
+      ],
       "expo-sqlite",
       [
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#5B6B5A"
+          "color": "#C8755D"
         }
       ]
     ],

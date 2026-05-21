@@ -34,7 +34,7 @@ const SECTIONS = [
   {
     title: 'Manual sorting',
     body:
-      'Choose Manual Sorting from the sort menu on Today, then long-press the drag handle on a row to reorder. Order saves on your device.',
+      'Choose Manual Sorting from the sort menu on Today, then long-press a row to reorder. Order saves on your device.',
   },
   {
     title: 'Focus Mode',
@@ -42,11 +42,20 @@ const SECTIONS = [
   },
   {
     title: 'Privacy',
-    body: PRIVACY_MAIN_LINE,
+    body: `${PRIVACY_MAIN_LINE}\n\nYour tasks are stored locally on your phone.`,
+  },
+  {
+    title: 'No ads',
+    body: 'Do! is designed to stay calm and focused. There are no ads in the app.',
+  },
+  {
+    title: 'Local storage',
+    body:
+      'Your tasks are stored on this device. Export or import a backup from Settings → Backup & Restore.',
   },
   {
     title: 'Backup',
-    body: `${BACKUP_SECTION_BODY} Export and import are coming soon; tasks are stored locally until then.`,
+    body: `${BACKUP_SECTION_BODY} Cloud sync is coming later.`,
   },
 ] as const;
 
