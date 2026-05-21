@@ -47,19 +47,13 @@ Default settings: system theme, haptics on, completed tasks collapsed, reminder 
 
 ## Free vs Pro (mock)
 
-**Free:** Today, schedule, focus, basic reminders, inbox + one custom list, themes, local SQLite storage, done history, subtle mock ads (Today, Schedule, Lists only).
+**Free:** Today, schedule, focus, basic reminders, inbox + one custom list, themes, local SQLite storage, done history.
 
-**Pro (mock):** Today — no ads, unlimited lists, calendar due-date picker on tasks. Paywall lists other benefits under **Coming soon** (not built yet).
+**Pro (mock):** Unlimited lists and Pro-gated features. Paywall lists planned benefits; toggle **Mock Pro enabled** on the Pro screen (persists in SQLite).
 
 Open **More → ClearDay Pro** → **Mock Pro enabled** (persists in SQLite).
 
 **Restore purchases** shows a placeholder until RevenueCat is integrated.
-
-## Ads (free users only)
-
-- Native-style mock cards, max one per screen
-- No ads in task detail, settings, Pro, Focus, or while typing
-- Hidden when `isPro` is true
 
 ## Subscriptions (future)
 

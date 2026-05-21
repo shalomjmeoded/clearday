@@ -50,22 +50,16 @@ function AppNavigator() {
         <Stack.Screen name="focus" options={focusModalOpts} />
         <Stack.Screen name="settings" options={settingsModalOpts} />
         <Stack.Screen name="pro" options={proModalOpts} />
+        <Stack.Screen name="help" options={settingsModalOpts} />
+        <Stack.Screen name="finished" options={settingsModalOpts} />
+        <Stack.Screen name="recurring" options={settingsModalOpts} />
         <Stack.Screen name="lists/[listId]" />
       </Stack>
     </NavigationThemeProvider>
   );
 }
 
-function RootShell({ ready }: { ready: boolean }) {
-  return (
-    <ThemedRoot>
-      {ready ? <AppNavigator /> : <BootstrapScreen />}
-    </ThemedRoot>
-  );
-}
-
 export default function RootLayout() {
-  const [hydrated, setHydrated] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -74,12 +68,10 @@ export default function RootLayout() {
         await initDatabase();
         await initReminders();
         await useSettingsStore.getState().hydrate();
-        setHydrated(true);
         await useTaskStore.getState().refreshAll();
         await useListStore.getState().refresh();
       } catch (error) {
         console.error('ClearDay bootstrap failed:', error);
-        setHydrated(true);
       } finally {
         setReady(true);
         await SplashScreen.hideAsync();
@@ -88,15 +80,13 @@ export default function RootLayout() {
     bootstrap();
   }, []);
 
-  if (!hydrated) {
-    return null;
-  }
-
   return (
     <GestureHandlerRootView style={styles.root}>
       <KeyboardProvider>
         <ThemeProvider>
-          <RootShell ready={ready} />
+          <ThemedRoot>
+            {ready ? <AppNavigator /> : <BootstrapScreen />}
+          </ThemedRoot>
         </ThemeProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>

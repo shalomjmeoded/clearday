@@ -1,6 +1,8 @@
 import React from 'react';
 import { StyleSheet, TextInput, type StyleProp, type ViewStyle } from 'react-native';
 
+import type { QuickAddOptions } from '@/types/quickAdd';
+
 import { BottomInputBar } from './BottomInputBar';
 import { BottomBarInsetProvider } from './BottomBarInsetContext';
 import { KeyboardDismissView } from './KeyboardDismissView';
@@ -9,7 +11,7 @@ import { useScreenInsets } from './useScreenInsets';
 
 interface Props {
   children: React.ReactNode;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string, options?: QuickAddOptions) => void;
   placeholder?: string;
   /** Tab screen (Today) — bar floats above tab bar; list inset includes tab height. */
   aboveTabBar?: boolean;
@@ -17,6 +19,9 @@ interface Props {
   style?: StyleProp<ViewStyle>;
   inputRef?: React.RefObject<TextInput | null>;
   showInputBar?: boolean;
+  /** Keep quick-add toolbar/input active while picking date, color, etc. */
+  keepEditing?: boolean;
+  dismissKeyboardOnBackdropPress?: boolean;
 }
 
 /**
@@ -32,6 +37,8 @@ export function ScreenWithBottomBar({
   style,
   inputRef,
   showInputBar = true,
+  keepEditing = false,
+  dismissKeyboardOnBackdropPress = true,
 }: Props) {
   const { listBottomInset } = useScreenInsets({
     variant: aboveTabBar ? 'tab' : 'stack',
@@ -42,7 +49,10 @@ export function ScreenWithBottomBar({
   return (
     <Screen edges={['top']} style={[styles.screen, style]}>
       {header}
-      <KeyboardDismissView style={styles.flex}>
+      <KeyboardDismissView
+        style={styles.flex}
+        dismissOnPress={dismissKeyboardOnBackdropPress}
+      >
         <BottomBarInsetProvider inset={listBottomInset}>
           {children}
         </BottomBarInsetProvider>
@@ -53,6 +63,7 @@ export function ScreenWithBottomBar({
           onSubmit={onSubmit}
           placeholder={placeholder}
           inputRef={inputRef}
+          keepEditing={keepEditing}
         />
       ) : null}
     </Screen>

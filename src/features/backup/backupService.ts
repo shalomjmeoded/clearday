@@ -47,6 +47,7 @@ export async function buildBackup(): Promise<ClearDayBackup> {
     lists: listRows.map((row) => ({
       id: row.id as string,
       name: row.name as string,
+      color: (row.color as string) ?? undefined,
       sortOrder: row.sortOrder as number,
       createdAt: row.createdAt as string,
       updatedAt: row.updatedAt as string,
@@ -110,11 +111,12 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
 
     for (const list of lists) {
       await db.runAsync(
-        `INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO lists (id, name, color, sortOrder, createdAt, updatedAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           list.id,
           list.name,
+          list.color ?? null,
           list.sortOrder,
           list.createdAt,
           list.updatedAt,
@@ -125,14 +127,15 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
 
     for (const task of tasks) {
       await db.runAsync(
-        `INSERT INTO tasks (id, title, notes, status, priority, dueDate, reminderAt, recurrence, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           task.id,
           task.title,
           task.notes ?? null,
           task.status,
           task.priority,
+          task.color ?? null,
           task.dueDate ?? null,
           task.reminderAt ?? null,
           task.recurrence,

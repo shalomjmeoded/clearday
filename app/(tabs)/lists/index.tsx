@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { AdSlot } from '@/components/ads/AdSlot';
 import { ListCreateForm } from '@/components/lists/ListCreateForm';
 import { ListRow } from '@/components/lists/ListRow';
 import {
@@ -138,8 +137,6 @@ export default function ListsScreen() {
           </Text>
         </Pressable>
       ) : null}
-
-      <AdSlot placement="lists_bottom" inset={false} />
     </ScrollScreen>
   );
 }

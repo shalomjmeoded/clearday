@@ -252,6 +252,14 @@ export const taskRepository = {
     return rows.map(mapRowToTask);
   },
 
+  async clearCompleted(): Promise<void> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM tasks WHERE status = 'completed' AND deletedAt IS NULL`
+    );
+    await Promise.all(rows.map((row) => this.deletePermanent(row.id)));
+  },
+
   async getByListId(listId: string): Promise<Task[]> {
     const db = await getDb();
     const rows = await db.getAllAsync<Record<string, unknown>>(

@@ -11,12 +11,21 @@ import {
 interface Props {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  /** When false, taps on the backdrop do not dismiss the keyboard. */
+  dismissOnPress?: boolean;
 }
 
 /** Tapping non-interactive areas dismisses the keyboard. */
-export function KeyboardDismissView({ children, style }: Props) {
+export function KeyboardDismissView({
+  children,
+  style,
+  dismissOnPress = true,
+}: Props) {
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <TouchableWithoutFeedback
+      onPress={dismissOnPress ? Keyboard.dismiss : undefined}
+      accessible={false}
+    >
       <View style={[styles.fill, style]}>{children}</View>
     </TouchableWithoutFeedback>
   );

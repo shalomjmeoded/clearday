@@ -64,7 +64,7 @@ export const ScrollScreen = forwardRef<ScrollScreenHandle, Props>(function Scrol
           style={[styles.flex, { backgroundColor: tokens.background }]}
           contentContainerStyle={[
             styles.content,
-            { paddingBottom: scrollBottomPadding },
+            { paddingBottom: scrollBottomPadding, backgroundColor: tokens.background },
             contentContainerStyle,
           ]}
           keyboardShouldPersistTaps="handled"

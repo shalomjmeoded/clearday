@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { AdSlot } from '@/components/ads/AdSlot';
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { TaskList } from '@/components/tasks/TaskList';
+import type { QuickAddOptions } from '@/types/quickAdd';
+import type { Task } from '@/types/task';
 import { useTaskStore } from '@/store/taskStore';
 import { dayIso } from '@/utils/scheduleDates';
 import { triggerSuccessHaptic, triggerLightHaptic } from '@/utils/haptics';
@@ -15,11 +16,13 @@ import { triggerSuccessHaptic, triggerLightHaptic } from '@/utils/haptics';
 export default function ScheduleScreen() {
   const [segment, setSegment] = useState('tomorrow');
   const tomorrowTasks = useTaskStore((s) => s.tomorrowTasks);
+  const tomorrowCompletedTasks = useTaskStore((s) => s.tomorrowCompletedTasks);
   const laterTasks = useTaskStore((s) => s.laterTasks);
   const refreshTomorrow = useTaskStore((s) => s.refreshTomorrow);
   const refreshLater = useTaskStore((s) => s.refreshLater);
   const addTask = useTaskStore((s) => s.addTask);
   const completeTask = useTaskStore((s) => s.completeTask);
+  const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const setImportant = useTaskStore((s) => s.setImportant);
@@ -34,6 +37,20 @@ export default function ScheduleScreen() {
   );
 
   const tasks = segment === 'tomorrow' ? tomorrowTasks : laterTasks;
+  const completedTasks = useMemo((): Task[] => {
+    if (segment !== 'tomorrow') return [];
+    return tomorrowCompletedTasks;
+  }, [segment, tomorrowCompletedTasks]);
+
+  const handleComplete = async (id: string) => {
+    await triggerSuccessHaptic();
+    await completeTask(id);
+  };
+
+  const handleUncomplete = async (id: string) => {
+    await triggerLightHaptic();
+    await uncompleteTask(id);
+  };
   const emptyMessage =
     segment === 'tomorrow'
       ? 'Nothing for tomorrow.'
@@ -43,10 +60,10 @@ export default function ScheduleScreen() {
       ? 'Add a task below, or swipe Today → Tomorrow.'
       : 'Add below with a date (e.g. “friday” or “in 2 weeks”).';
 
-  const handleAdd = async (text: string) => {
+  const handleAdd = async (text: string, options?: QuickAddOptions) => {
     const defaultDueDate =
       segment === 'tomorrow' ? dayIso(1) : dayIso(7);
-    const created = await addTask(text, undefined, { defaultDueDate });
+    const created = await addTask(text, undefined, { ...options, defaultDueDate });
     if (!created) {
       Alert.alert('Could not add task', 'Please try again.');
     }
@@ -78,13 +95,12 @@ export default function ScheduleScreen() {
       <View style={styles.list}>
         <TaskList
           activeTasks={tasks}
-          completedTasks={[]}
+          completedTasks={completedTasks}
+          inlineCompleted={segment === 'tomorrow'}
           emptyMessage={emptyMessage}
           emptySubtitle={emptySubtitle}
-          onComplete={async (id) => {
-            await triggerSuccessHaptic();
-            await completeTask(id);
-          }}
+          onComplete={handleComplete}
+          onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}
           onArchive={async (id) => {
             await triggerLightHaptic();
@@ -106,11 +122,6 @@ export default function ScheduleScreen() {
           }}
           onSetImportant={setImportant}
           onToggleRecurring={toggleRecurring}
-          ListFooterExtra={
-            <View style={styles.adWrap}>
-              <AdSlot placement="schedule_bottom" />
-            </View>
-          }
         />
       </View>
     </ScreenWithBottomBar>
@@ -119,5 +130,4 @@ export default function ScheduleScreen() {
 
 const styles = StyleSheet.create({
   list: { flex: 1 },
-  adWrap: { marginTop: 0 },
 });

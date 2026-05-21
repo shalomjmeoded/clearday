@@ -20,11 +20,11 @@ Tasks are stored locally on your device. Export and import backup files from Set
 
 **Free**
 
-Today, schedule, focus, reminders, one custom list, themes, and subtle sponsored placements.
+Today, schedule, focus, basic reminders, one custom list, themes, and local storage.
 
 **Pro (subscriptions coming)**
 
-Included when Pro ships: no ads, unlimited lists, choose any due date on a task.
+Unlimited lists, recurring tasks, advanced reminders, widgets, premium themes, backup/export, sync, and more.
 
 Backup export/import is available to all users. Cloud sync is not available yet — use Export on one device and Import on another.
 
