@@ -22,6 +22,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type {
+  ColorTheme,
   CompletedTaskBehavior,
   ThemeMode,
 } from '@/types/settings';
@@ -43,6 +44,15 @@ const THEME_OPTIONS: { key: ThemeMode; label: string }[] = [
   { key: 'system', label: 'System' },
   { key: 'light', label: 'Light' },
   { key: 'dark', label: 'Dark' },
+];
+
+const COLOR_THEME_OPTIONS: { key: ColorTheme; label: string }[] = [
+  { key: 'classic', label: 'Classic' },
+  { key: 'yellow', label: 'Yellow' },
+  { key: 'pink', label: 'Pink' },
+  { key: 'mint', label: 'Mint' },
+  { key: 'sky', label: 'Sky' },
+  { key: 'graphite', label: 'Graphite' },
 ];
 
 const BEHAVIOR_OPTIONS: { key: CompletedTaskBehavior; label: string }[] = [
@@ -138,6 +148,14 @@ export default function SettingsScreen() {
             options={THEME_OPTIONS}
             value={settings.theme}
             onChange={(t) => update('theme', t)}
+          />
+          <Text style={[typography.meta, styles.hint, { color: tokens.mutedText }]}>
+            List color
+          </Text>
+          <SettingsChips
+            options={COLOR_THEME_OPTIONS}
+            value={settings.colorTheme}
+            onChange={(t) => update('colorTheme', t)}
           />
         </SettingsGroup>
 

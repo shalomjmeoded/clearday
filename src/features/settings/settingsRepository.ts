@@ -3,7 +3,9 @@ import { getDb } from '@/db/client';
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
+  type ColorTheme,
   type CompletedTaskBehavior,
+  type TaskSwipeAction,
   type ThemeMode,
 } from '@/types/settings';
 
@@ -11,6 +13,7 @@ function parseSettings(rows: { key: string; value: string }[]): AppSettings {
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   return {
     theme: (map.theme as ThemeMode) ?? DEFAULT_SETTINGS.theme,
+    colorTheme: (map.colorTheme as ColorTheme) ?? DEFAULT_SETTINGS.colorTheme,
     hapticsEnabled:
       map.hapticsEnabled === undefined
         ? DEFAULT_SETTINGS.hapticsEnabled
@@ -20,6 +23,12 @@ function parseSettings(rows: { key: string; value: string }[]): AppSettings {
       DEFAULT_SETTINGS.completedTaskBehavior,
     defaultReminderTime:
       map.defaultReminderTime ?? DEFAULT_SETTINGS.defaultReminderTime,
+    swipeLeftAction:
+      (map.swipeLeftAction as TaskSwipeAction) ??
+      DEFAULT_SETTINGS.swipeLeftAction,
+    swipeRightAction:
+      (map.swipeRightAction as TaskSwipeAction) ??
+      DEFAULT_SETTINGS.swipeRightAction,
     defaultListId: map.defaultListId ?? DEFAULT_SETTINGS.defaultListId ?? INBOX_LIST_ID,
     isPro:
       map.isPro === undefined

@@ -9,6 +9,7 @@ export interface Task {
   notes?: string;
   status: TaskStatus;
   priority: TaskPriority;
+  color?: string;
   dueDate?: string;
   reminderAt?: string;
   recurrence: TaskRecurrence;
@@ -26,6 +27,7 @@ export type CreateTaskInput = Pick<Task, 'title'> &
       Task,
       | 'notes'
       | 'priority'
+      | 'color'
       | 'dueDate'
       | 'reminderAt'
       | 'recurrence'

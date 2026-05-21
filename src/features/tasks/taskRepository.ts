@@ -60,6 +60,7 @@ export const taskRepository = {
       notes: input.notes,
       status: 'active',
       priority: input.priority ?? 'normal',
+      color: input.color,
       dueDate,
       reminderAt: input.reminderAt,
       recurrence,
@@ -70,14 +71,15 @@ export const taskRepository = {
     };
 
     await db.runAsync(
-      `INSERT INTO tasks (id, title, notes, status, priority, dueDate, reminderAt, recurrence, listId, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, listId, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.title,
         task.notes ?? null,
         task.status,
         task.priority,
+        task.color ?? null,
         task.dueDate ?? null,
         task.reminderAt ?? null,
         task.recurrence,
@@ -120,7 +122,7 @@ export const taskRepository = {
     }
 
     await db.runAsync(
-      `UPDATE tasks SET title = ?, notes = ?, status = ?, priority = ?, dueDate = ?, reminderAt = ?,
+      `UPDATE tasks SET title = ?, notes = ?, status = ?, priority = ?, color = ?, dueDate = ?, reminderAt = ?,
         recurrence = ?, listId = ?, sortOrder = ?, completedAt = ?, updatedAt = ?, deletedAt = ?
        WHERE id = ?`,
       [
@@ -128,6 +130,7 @@ export const taskRepository = {
         updated.notes ?? null,
         updated.status,
         updated.priority,
+        updated.color ?? null,
         updated.dueDate ?? null,
         updated.reminderAt ?? null,
         updated.recurrence,
@@ -201,6 +204,31 @@ export const taskRepository = {
 
   async moveToTomorrow(id: string): Promise<Task | null> {
     return this.update(id, { dueDate: tomorrowIso() });
+  },
+
+  async setPriority(id: string, priority: Task['priority']): Promise<Task | null> {
+    return this.update(id, { priority });
+  },
+
+  async setRecurrence(
+    id: string,
+    recurrence: Task['recurrence']
+  ): Promise<Task | null> {
+    return this.update(id, { recurrence });
+  },
+
+  async reorderTasks(orderedIds: string[]): Promise<void> {
+    if (orderedIds.length === 0) return;
+    const db = await getDb();
+    const now = nowIso();
+    await Promise.all(
+      orderedIds.map((id, index) =>
+        db.runAsync(
+          'UPDATE tasks SET sortOrder = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
+          [index, now, id]
+        )
+      )
+    );
   },
 
   async scheduleForDate(id: string, dueDate: string): Promise<Task | null> {

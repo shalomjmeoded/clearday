@@ -11,6 +11,7 @@ interface ListState {
   refresh: () => Promise<void>;
   createList: (name: string) => Promise<TaskList>;
   renameList: (id: string, name: string) => Promise<void>;
+  setListColor: (id: string, color: string) => Promise<void>;
   deleteList: (id: string) => Promise<void>;
 }
 
@@ -28,6 +29,11 @@ export const useListStore = create<ListState>((set) => ({
   },
   renameList: async (id, name) => {
     await listRepository.rename(id, name);
+    const lists = await listRepository.getAll();
+    set({ lists });
+  },
+  setListColor: async (id, color) => {
+    await listRepository.updateColor(id, color);
     const lists = await listRepository.getAll();
     set({ lists });
   },

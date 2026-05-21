@@ -15,6 +15,7 @@ interface Props {
   placeholder?: string;
   /** Lift above the tab bar on tab screens (keyboard closed). */
   aboveTabBar?: boolean;
+  inputRef?: React.RefObject<TextInput | null>;
 }
 
 /** Sticks above the keyboard; safe-area padding when keyboard is closed. */
@@ -22,6 +23,7 @@ export function BottomInputBar({
   onSubmit,
   placeholder = 'Add something…',
   aboveTabBar = false,
+  inputRef,
 }: Props) {
   const { tokens } = useTheme();
   const { bottomSafe, tabBarHeight } = useScreenInsets({
@@ -66,6 +68,7 @@ export function BottomInputBar({
         ]}
       >
         <TextInput
+          ref={inputRef}
           value={text}
           onChangeText={(v) => {
             setText(v);
@@ -73,7 +76,7 @@ export function BottomInputBar({
           }}
           placeholder={placeholder}
           placeholderTextColor={tokens.mutedText}
-          style={[typography.body, styles.input, { color: tokens.text }]}
+          style={[typography.taskTitle, styles.input, { color: tokens.text }]}
           returnKeyType="done"
           onSubmitEditing={submit}
           onFocus={() => setFocused(true)}
@@ -105,8 +108,8 @@ const styles = StyleSheet.create({
   inputWrap: {
     borderRadius: radius.lg,
     borderWidth: 1.5,
-    paddingHorizontal: spacing.lg,
-    minHeight: MIN_TOUCH_TARGET + 8,
+    paddingHorizontal: spacing.md,
+    minHeight: MIN_TOUCH_TARGET + 4,
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -115,7 +118,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   input: {
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     padding: 0,
     margin: 0,
   },

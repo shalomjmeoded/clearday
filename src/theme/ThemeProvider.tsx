@@ -18,10 +18,11 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const themeMode = useSettingsStore((s) => s.settings.theme);
+  const colorTheme = useSettingsStore((s) => s.settings.colorTheme);
   const systemScheme = useColorScheme();
 
   const value = useMemo<ThemeContextValue>(() => {
-    const tokens = resolveThemeTokens(themeMode, systemScheme);
+    const tokens = resolveThemeTokens(themeMode, systemScheme, colorTheme);
     const isDark =
       themeMode === 'dark' ||
       (themeMode === 'system' && systemScheme === 'dark');
@@ -30,7 +31,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       mode: themeMode,
       isDark,
     };
-  }, [themeMode, systemScheme]);
+  }, [themeMode, systemScheme, colorTheme]);
 
   return (
     <ThemeContext.Provider value={value}>

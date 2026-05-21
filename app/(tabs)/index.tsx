@@ -1,29 +1,43 @@
 import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { TaskList } from '@/components/tasks/TaskList';
-import {
-  TODAY_FILTER_ALL,
-  TodayListFilter,
-} from '@/components/today/TodayListFilter';
+import { TODAY_FILTER_ALL } from '@/components/today/TodayListFilter';
 import { INBOX_LIST_ID } from '@/db/constants';
-import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useListStore } from '@/store/listStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
-import { formatHeaderDate } from '@/utils/dates';
+import { isOverdue } from '@/utils/dates';
 import {
   triggerLightHaptic,
   triggerMediumHaptic,
   triggerSuccessHaptic,
 } from '@/utils/haptics';
 import type { Task } from '@/types/task';
+
+type TaskSortMode =
+  | 'manual'
+  | 'scheduled'
+  | 'created'
+  | 'modified'
+  | 'alpha'
+  | 'color';
+
+const SORT_OPTIONS: { key: TaskSortMode; label: string }[] = [
+  { key: 'manual', label: 'Manual Sorting' },
+  { key: 'scheduled', label: 'Scheduled Date' },
+  { key: 'created', label: 'Created Date' },
+  { key: 'modified', label: 'Modified Date' },
+  { key: 'alpha', label: 'Alphabetical' },
+  { key: 'color', label: 'Color Tag' },
+];
 
 function filterTasksByList(tasks: Task[], listFilter: string): Task[] {
   if (listFilter === TODAY_FILTER_ALL) return tasks;
@@ -34,40 +48,143 @@ function filterTasksByList(tasks: Task[], listFilter: string): Task[] {
 
 export default function TodayScreen() {
   const { tokens } = useTheme();
+  const addInputRef = useRef<TextInput | null>(null);
   const lists = useListStore((s) => s.lists);
   const defaultListId = useSettingsStore((s) => s.settings.defaultListId);
   const todayTasks = useTaskStore((s) => s.todayTasks);
   const todayCompletedTasks = useTaskStore((s) => s.todayCompletedTasks);
+  const tomorrowTasks = useTaskStore((s) => s.tomorrowTasks);
+  const laterTasks = useTaskStore((s) => s.laterTasks);
   const todayReady = useTaskStore((s) => s.todayReady);
-  const refreshToday = useTaskStore((s) => s.refreshToday);
+  const refreshAll = useTaskStore((s) => s.refreshAll);
   const refreshLists = useListStore((s) => s.refresh);
   const addTask = useTaskStore((s) => s.addTask);
   const completeTask = useTaskStore((s) => s.completeTask);
   const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
+  const deleteTask = useTaskStore((s) => s.deleteTask);
+  const setImportant = useTaskStore((s) => s.setImportant);
+  const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
-  const [listFilter, setListFilter] = useState(TODAY_FILTER_ALL);
+  const reorderTasks = useTaskStore((s) => s.reorderTasks);
+  const [listFilter] = useState(TODAY_FILTER_ALL);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'overdue' | 'today' | 'tomorrow'>('all');
+  const [reorderMode, setReorderMode] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [sortMode, setSortMode] = useState<TaskSortMode>('manual');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      refreshToday();
+      refreshAll();
       refreshLists();
-    }, [refreshToday, refreshLists])
+    }, [refreshAll, refreshLists])
   );
 
-  const filteredActive = useMemo(
-    () => filterTasksByList(todayTasks, listFilter),
-    [todayTasks, listFilter]
+  const allActiveTasks = useMemo(() => {
+    const map = new Map<string, Task>();
+    [...todayTasks, ...tomorrowTasks, ...laterTasks].forEach((task) => {
+      map.set(task.id, task);
+    });
+    return [...map.values()].sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [todayTasks, tomorrowTasks, laterTasks]);
+
+  const listColors = useMemo(
+    () =>
+      Object.fromEntries(
+        lists
+          .filter((list) => Boolean(list.color))
+          .map((list) => [list.id, list.color as string])
+      ),
+    [lists]
   );
+
+  const filteredActive = useMemo(() => {
+    let nextTasks: Task[];
+    if (statusFilter === 'overdue') {
+      nextTasks = allActiveTasks.filter((task) => task.dueDate && isOverdue(task.dueDate));
+    } else if (statusFilter === 'tomorrow') {
+      nextTasks = filterTasksByList(tomorrowTasks, listFilter);
+    } else if (statusFilter === 'today') {
+      nextTasks = filterTasksByList(todayTasks, listFilter);
+    } else {
+      nextTasks = filterTasksByList(allActiveTasks, listFilter);
+    }
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      nextTasks = nextTasks.filter(
+        (task) =>
+          task.title.toLowerCase().includes(query) ||
+          (task.notes ?? '').toLowerCase().includes(query)
+      );
+    }
+    if (sortMode === 'scheduled') {
+      return [...nextTasks].sort((a, b) => {
+        const aDate = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+        const bDate = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+        return aDate - bDate || a.sortOrder - b.sortOrder;
+      });
+    }
+    if (sortMode === 'created') {
+      return [...nextTasks].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    }
+    if (sortMode === 'modified') {
+      return [...nextTasks].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    }
+    if (sortMode === 'alpha') {
+      return [...nextTasks].sort((a, b) => a.title.localeCompare(b.title));
+    }
+    if (sortMode === 'color') {
+      return [...nextTasks].sort((a, b) => {
+        const aColor = a.color ?? listColors[a.listId ?? ''] ?? '';
+        const bColor = b.color ?? listColors[b.listId ?? ''] ?? '';
+        return aColor.localeCompare(bColor) || a.sortOrder - b.sortOrder;
+      });
+    }
+    return nextTasks;
+  }, [
+    allActiveTasks,
+    listColors,
+    listFilter,
+    searchQuery,
+    sortMode,
+    statusFilter,
+    todayTasks,
+    tomorrowTasks,
+  ]);
   const filteredCompleted = useMemo(
-    () => filterTasksByList(todayCompletedTasks, listFilter),
-    [todayCompletedTasks, listFilter]
+    () =>
+      statusFilter === 'all' || statusFilter === 'today'
+        ? filterTasksByList(todayCompletedTasks, listFilter)
+        : [],
+    [todayCompletedTasks, listFilter, statusFilter]
   );
+  const totalVisible = filteredActive.length + filteredCompleted.length;
+  const overdueCount = allActiveTasks.filter(
+    (task) => task.dueDate && isOverdue(task.dueDate)
+  ).length;
+  const statusTabs = [
+    { key: 'all' as const, label: 'All', count: allActiveTasks.length },
+    { key: 'overdue' as const, label: 'Overdue', count: overdueCount },
+    { key: 'today' as const, label: 'Today', count: todayTasks.length },
+    { key: 'tomorrow' as const, label: 'Tomorrow', count: tomorrowTasks.length },
+  ];
 
   const addTargetListId =
     listFilter === TODAY_FILTER_ALL ? defaultListId : listFilter;
   const addTargetListName =
     lists.find((l) => l.id === addTargetListId)?.name ?? 'Inbox';
+  useEffect(() => {
+    if (!adding) return;
+    const timer = setTimeout(() => addInputRef.current?.focus(), 60);
+    return () => clearTimeout(timer);
+  }, [adding]);
 
   const handleComplete = async (id: string) => {
     if (todayCompletedTasks.some((t) => t.id === id)) {
@@ -84,11 +201,27 @@ export default function TodayScreen() {
     await archiveTask(id);
   };
 
+  const handleDelete = async (id: string) => {
+    Alert.alert('Delete task?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await triggerLightHaptic();
+          await deleteTask(id);
+        },
+      },
+    ]);
+  };
+
   const handleAdd = async (text: string) => {
     const created = await addTask(text, addTargetListId);
     if (!created) {
       Alert.alert('Could not add task', 'Please try again.');
+      return;
     }
+    setAdding(false);
   };
 
   const openFocus = async () => {
@@ -96,78 +229,200 @@ export default function TodayScreen() {
     router.push('/focus');
   };
 
+  const openSettings = async () => {
+    await triggerMediumHaptic();
+    router.push('/settings');
+  };
+
+  const toggleSearch = async () => {
+    await triggerLightHaptic();
+    setSearchOpen((value) => !value);
+    if (searchOpen) setSearchQuery('');
+  };
+
+  const openLists = async () => {
+    await triggerMediumHaptic();
+    router.push('/lists');
+  };
+
+  const toggleOrder = async () => {
+    await triggerLightHaptic();
+    setSortMenuOpen((value) => !value);
+  };
+
   const header = (
     <View>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={[typography.heroTitle, { color: tokens.text }]}>
-            Today
-          </Text>
-          <Text
-            style={[
-              typography.caption,
-              styles.date,
-              { color: tokens.mutedText },
-            ]}
-          >
-            {formatHeaderDate()}
-          </Text>
-          <Text style={[typography.meta, styles.defaultHint, { color: tokens.mutedText }]}>
-            Adding to {addTargetListName}
+            Do!
           </Text>
         </View>
         <Pressable
-          onPress={openFocus}
+          onPress={toggleOrder}
           style={({ pressed }) => [
-            styles.focusBtn,
+            styles.sortPill,
             {
-              backgroundColor: tokens.accentSoft,
+              backgroundColor: sortMenuOpen ? tokens.accentSoft : 'transparent',
               borderColor: tokens.border,
-              minHeight: MIN_TOUCH_TARGET,
             },
             pressed && styles.focusPressed,
           ]}
         >
-          <Text
-            style={[
-              typography.button,
-              { color: tokens.accent, fontSize: 15 },
-            ]}
-          >
-            Focus
+          <Ionicons name="list-outline" size={13} color={tokens.text} />
+          <Text style={[typography.body, styles.sortText, { color: tokens.text }]}>
+            {SORT_OPTIONS.find((option) => option.key === sortMode)?.label}
           </Text>
         </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={toggleSearch}
+            style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
+            hitSlop={10}
+          >
+            <Ionicons name="search-outline" size={19} color={tokens.text} />
+          </Pressable>
+          <Pressable
+            onPress={openLists}
+            style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
+            hitSlop={10}
+          >
+            <Ionicons name="folder-outline" size={19} color={tokens.text} />
+          </Pressable>
+          <Pressable
+            onPress={openSettings}
+            style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
+          >
+            <Ionicons name="settings-outline" size={19} color={tokens.text} />
+          </Pressable>
+        </View>
       </View>
-      {lists.length > 0 ? (
-        <TodayListFilter
-          lists={lists}
-          value={listFilter}
-          onChange={setListFilter}
-        />
+      {searchOpen ? (
+        <View style={styles.searchWrap}>
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+            placeholder="Search"
+            placeholderTextColor={tokens.mutedText}
+            style={[
+              typography.body,
+              styles.searchInput,
+              {
+                color: tokens.text,
+                borderColor: tokens.border,
+                backgroundColor: tokens.sectionBg,
+              },
+            ]}
+          />
+        </View>
       ) : null}
+      {sortMenuOpen ? (
+        <View style={[styles.sortMenu, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
+          {SORT_OPTIONS.map((option) => {
+            const active = option.key === sortMode;
+            return (
+              <Pressable
+                key={option.key}
+                onPress={async () => {
+                  await triggerLightHaptic();
+                  setSortMode(option.key);
+                  setReorderMode(false);
+                  setSortMenuOpen(false);
+                }}
+                style={({ pressed }) => [styles.sortOption, pressed && { opacity: 0.72 }]}
+              >
+                <Text style={[typography.meta, { color: active ? tokens.accent : tokens.text }]}>
+                  {option.label}
+                </Text>
+                {active ? <Ionicons name="checkmark" size={15} color={tokens.accent} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.statusTabs}
+      >
+        {statusTabs.map((tab) => {
+          const active = statusFilter === tab.key;
+          return (
+            <Pressable
+              key={tab.key}
+              onPress={() => setStatusFilter(tab.key)}
+              style={styles.statusTab}
+            >
+              <Text
+                style={[
+                  typography.screenTitle,
+                  styles.statusTabText,
+                  { color: active ? tokens.text : tokens.mutedText },
+                ]}
+              >
+                {tab.label} ({tab.count})
+              </Text>
+              {active ? (
+                <View style={[styles.activeUnderline, { backgroundColor: tokens.text }]} />
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 
   return (
-    <ScreenWithBottomBar aboveTabBar onSubmit={handleAdd} header={header}>
+    <ScreenWithBottomBar
+      aboveTabBar
+      onSubmit={handleAdd}
+      header={header}
+      inputRef={addInputRef}
+      showInputBar={adding}
+    >
       <View style={styles.list}>
         <TaskList
           activeTasks={filteredActive}
           completedTasks={filteredCompleted}
           loading={!todayReady}
-          adPlacement="today_after_tasks"
+          listColors={listColors}
           hideAdWhenKeyboardOpen
           emptyMessage={
-            listFilter === TODAY_FILTER_ALL
-              ? 'Nothing for today. Nice.'
-              : 'Nothing for this list today.'
+            statusFilter === 'all'
+              ? 'No tasks here.'
+              : `No ${statusFilter} tasks.`
           }
           emptySubtitle="Tap below when something comes to mind."
           onComplete={handleComplete}
           onPress={(id) => router.push(`/task/${id}`)}
           onArchive={handleArchive}
           onMoveTomorrow={moveToTomorrow}
+          onDelete={handleDelete}
+          onSetImportant={setImportant}
+          onToggleRecurring={toggleRecurring}
+          onStartManualSort={() => {
+            setSortMode('manual');
+          }}
+          onEndManualSort={() => setReorderMode(false)}
+          onReorder={(orderedIds) =>
+            reorderTasks(
+              orderedIds,
+              listFilter === TODAY_FILTER_ALL ? undefined : listFilter
+            )
+          }
+          reorderMode={reorderMode}
         />
+        <Pressable
+          onPress={() => setAdding(true)}
+          style={({ pressed }) => [
+            styles.fab,
+            { backgroundColor: '#4F8EEB' },
+            pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          <Ionicons name="add" size={26} color="#fff" />
+        </Pressable>
       </View>
     </ScreenWithBottomBar>
   );
@@ -177,25 +432,104 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+    gap: spacing.sm,
   },
-  headerText: { flex: 1, gap: spacing.xs },
-  date: { marginTop: spacing.xs },
+  headerText: { flexShrink: 0 },
+  headerActions: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
+  iconBtn: {
+    minWidth: 25,
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sortPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.xs,
+    minHeight: 25,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  sortText: { fontSize: 12, lineHeight: 15 },
+  searchWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
+  searchInput: {
+    minHeight: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    fontSize: 16,
+  },
+  sortMenu: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  sortOption: {
+    minHeight: 34,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusTabs: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md + 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#2F3638',
+  },
+  statusTab: {
+    minHeight: 38,
+    justifyContent: 'flex-end',
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm + 2,
+  },
+  statusTabText: { fontSize: 16, lineHeight: 21 },
+  activeUnderline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: -1,
+    height: 4,
+    borderRadius: 3,
+  },
+  date: { marginTop: -2 },
   defaultHint: {
-    marginTop: spacing.xs,
+    marginTop: 0,
     textTransform: 'none',
     letterSpacing: 0,
   },
   focusBtn: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
-    paddingHorizontal: spacing.md + 2,
+    width: 44,
     justifyContent: 'center',
+    alignItems: 'center',
     marginTop: spacing.xs,
   },
   focusPressed: { opacity: 0.75, transform: [{ scale: 0.98 }] },
   list: { flex: 1 },
+  fab: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

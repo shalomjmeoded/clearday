@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { ScrollView, Pressable, StyleSheet } from 'react-native';
+import { ScrollView, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   interpolate,
   interpolateColor,
@@ -25,12 +25,13 @@ interface Props {
 
 interface ChipProps {
   label: string;
+  color?: string;
   active: boolean;
   tokens: ThemeTokens;
   onPress: () => void;
 }
 
-function FilterChip({ label, active, tokens, onPress }: ChipProps) {
+function FilterChip({ label, color, active, tokens, onPress }: ChipProps) {
   const progress = useSharedValue(active ? 1 : 0);
 
   useEffect(() => {
@@ -62,6 +63,7 @@ function FilterChip({ label, active, tokens, onPress }: ChipProps) {
   return (
     <Pressable onPress={onPress}>
       <Animated.View style={[styles.chip, chipStyle]}>
+        {color ? <View style={[styles.dot, { backgroundColor: color }]} /> : null}
         <Animated.Text
           style={[
             typography.meta,
@@ -80,8 +82,8 @@ export function TodayListFilter({ lists, value, onChange }: Props) {
   const { tokens } = useTheme();
 
   const segments = [
-    { id: TODAY_FILTER_ALL, label: 'All' },
-    ...lists.map((l) => ({ id: l.id, label: l.name })),
+    { id: TODAY_FILTER_ALL, label: 'All', color: undefined },
+    ...lists.map((l) => ({ id: l.id, label: l.name, color: l.color })),
   ];
 
   return (
@@ -95,6 +97,7 @@ export function TodayListFilter({ lists, value, onChange }: Props) {
         <FilterChip
           key={seg.id}
           label={seg.label}
+          color={seg.color}
           active={value === seg.id}
           tokens={tokens}
           onPress={async () => {
@@ -110,19 +113,23 @@ export function TodayListFilter({ lists, value, onChange }: Props) {
 }
 
 const styles = StyleSheet.create({
-  scroll: { flexGrow: 0, marginBottom: spacing.sm, overflow: 'visible' },
+  scroll: { flexGrow: 0, marginBottom: spacing.xs, overflow: 'visible' },
   row: {
     paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-    paddingTop: spacing.xs + 2,
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
     paddingBottom: spacing.xs,
   },
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md - 2,
+    paddingVertical: spacing.xs + 2,
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 36,
+    minHeight: 32,
     justifyContent: 'center',
   },
+  dot: { width: 8, height: 8, borderRadius: 4 },
 });

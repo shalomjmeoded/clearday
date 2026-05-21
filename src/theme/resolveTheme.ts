@@ -1,8 +1,8 @@
 import type { ColorSchemeName } from 'react-native';
 
-import type { ThemeMode } from '@/types/settings';
+import type { ColorTheme, ThemeMode } from '@/types/settings';
 
-import { darkTheme, lightTheme, type ThemeTokens } from './tokens';
+import { darkPalettes, lightPalettes, type ThemeTokens } from './tokens';
 
 export function resolveIsDark(
   themeMode: ThemeMode,
@@ -15,7 +15,9 @@ export function resolveIsDark(
 
 export function resolveThemeTokens(
   themeMode: ThemeMode,
-  systemScheme: ColorSchemeName | null | undefined
+  systemScheme: ColorSchemeName | null | undefined,
+  colorTheme: ColorTheme = 'classic'
 ): ThemeTokens {
-  return resolveIsDark(themeMode, systemScheme) ? darkTheme : lightTheme;
+  const palettes = resolveIsDark(themeMode, systemScheme) ? darkPalettes : lightPalettes;
+  return palettes[colorTheme] ?? palettes.classic;
 }

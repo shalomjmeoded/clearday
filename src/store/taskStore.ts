@@ -11,6 +11,7 @@ import {
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import type { Task } from '@/types/task';
 import { INBOX_LIST_ID } from '@/db/constants';
+import { listRepository } from '@/features/lists/listRepository';
 
 export type TaskView = 'today' | 'tomorrow' | 'later' | 'done' | 'list';
 
@@ -36,7 +37,11 @@ interface TaskState {
   completeTask: (id: string) => Promise<void>;
   uncompleteTask: (id: string) => Promise<void>;
   archiveTask: (id: string) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  setImportant: (id: string) => Promise<void>;
+  toggleRecurring: (id: string) => Promise<void>;
   moveToTomorrow: (id: string) => Promise<void>;
+  reorderTasks: (orderedIds: string[], listId?: string) => Promise<void>;
   scheduleTask: (id: string, dueDate: string) => Promise<void>;
   refreshAll: () => Promise<void>;
 }
@@ -108,6 +113,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     let priority: Task['priority'] = 'normal';
     let dueDate: string | undefined = options?.defaultDueDate;
     let reminderAt: string | undefined;
+    let recurrence: Task['recurrence'] | undefined;
+    let targetListId = listId;
 
     try {
       const parsed = parseTaskInput(trimmed);
@@ -115,6 +122,19 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       priority = parsed.priority;
       dueDate = parsed.dueDate ?? dueDate;
       reminderAt = parsed.reminderAt;
+      recurrence = parsed.recurrence;
+      if (parsed.listHint) {
+        const lists = await listRepository.getAll();
+        const hint = parsed.listHint.toLowerCase();
+        const matched = lists.find(
+          (l) =>
+            l.name.toLowerCase() === hint ||
+            l.name.toLowerCase().replace(/\s+/g, '') === hint
+        );
+        if (matched) {
+          targetListId = matched.id;
+        }
+      }
       if (dueDate && priority === 'must_do_today') {
         priority = 'normal';
       }
@@ -128,9 +148,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         priority,
         dueDate,
         reminderAt,
-        listId,
+        recurrence,
+        listId: targetListId,
       });
-      await refreshAfterMutation(get, listId);
+      await refreshAfterMutation(get, targetListId);
       return task;
     } catch {
       return null;
@@ -155,10 +176,35 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     await refreshAfterMutation(get, existing?.listId);
   },
 
+  deleteTask: async (id) => {
+    const existing = await taskRepository.getById(id);
+    await taskRepository.deletePermanent(id);
+    await refreshAfterMutation(get, existing?.listId);
+  },
+
+  setImportant: async (id) => {
+    const existing = await taskRepository.getById(id);
+    const nextPriority = existing?.priority === 'important' ? 'normal' : 'important';
+    await taskRepository.setPriority(id, nextPriority);
+    await refreshAfterMutation(get, existing?.listId);
+  },
+
+  toggleRecurring: async (id) => {
+    const existing = await taskRepository.getById(id);
+    const nextRecurrence = existing?.recurrence === 'daily' ? 'none' : 'daily';
+    await taskRepository.setRecurrence(id, nextRecurrence);
+    await refreshAfterMutation(get, existing?.listId);
+  },
+
   moveToTomorrow: async (id) => {
     const existing = await taskRepository.getById(id);
     await taskRepository.moveToTomorrow(id);
     await refreshAfterMutation(get, existing?.listId);
+  },
+
+  reorderTasks: async (orderedIds, listId) => {
+    await taskRepository.reorderTasks(orderedIds);
+    await refreshAfterMutation(get, listId);
   },
 
   scheduleTask: async (id, dueDate) => {

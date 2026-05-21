@@ -7,7 +7,7 @@ import { Screen } from '@/components/layout/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { TextField } from '@/components/ui/TextField';
 import { INBOX_LIST_ID } from '@/db/constants';
-import { listRepository } from '@/features/lists/listRepository';
+import { LIST_COLORS, listRepository } from '@/features/lists/listRepository';
 import { useListStore } from '@/store/listStore';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -20,9 +20,11 @@ export default function ListEditScreen() {
   const listId = paramString(id);
   const { tokens } = useTheme();
   const renameList = useListStore((s) => s.renameList);
+  const setListColor = useListStore((s) => s.setListColor);
   const deleteList = useListStore((s) => s.deleteList);
 
   const [name, setName] = useState('');
+  const [color, setColor] = useState(LIST_COLORS[0]);
   const [found, setFound] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [nameError, setNameError] = useState<string | undefined>();
@@ -40,6 +42,7 @@ export default function ListEditScreen() {
     listRepository.getById(listId).then((list) => {
       if (list) {
         setName(list.name);
+        setColor(list.color ?? LIST_COLORS[0]);
         setFound(true);
       } else {
         setFound(false);
@@ -60,6 +63,7 @@ export default function ListEditScreen() {
     try {
       await triggerLightHaptic();
       await renameList(listId, trimmed);
+      await setListColor(listId, color);
       router.back();
     } finally {
       setSaving(false);
@@ -138,6 +142,31 @@ export default function ListEditScreen() {
           onSubmitEditing={save}
         />
 
+        <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+          COLOR
+        </Text>
+        <View style={styles.swatches}>
+          {LIST_COLORS.map((swatch) => (
+            <Pressable
+              key={swatch}
+              onPress={async () => {
+                await triggerLightHaptic();
+                setColor(swatch);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Choose list color"
+              style={[
+                styles.swatch,
+                {
+                  backgroundColor: swatch,
+                  borderColor: color === swatch ? tokens.text : tokens.border,
+                },
+                color === swatch && styles.swatchSelected,
+              ]}
+            />
+          ))}
+        </View>
+
         <PrimaryButton
           label={saving ? 'Saving…' : 'Save name'}
           onPress={save}
@@ -168,5 +197,25 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: spacing.xl,
     paddingTop: spacing.lg,
+  },
+  sectionLabel: {
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    letterSpacing: 0.4,
+  },
+  swatches: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  swatch: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+  },
+  swatchSelected: {
+    transform: [{ scale: 1.05 }],
   },
 });

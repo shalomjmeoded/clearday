@@ -13,12 +13,15 @@ import {
 } from 'date-fns';
 
 import type { TaskPriority } from '@/types/task';
+import type { TaskRecurrence } from '@/types/recurrence';
 
 export interface ParsedTaskInput {
   title: string;
   priority: TaskPriority;
   dueDate?: string;
   reminderAt?: string;
+  listHint?: string;
+  recurrence?: TaskRecurrence;
 }
 
 const WEEKDAYS: Record<string, (date: Date) => Date> = {
@@ -59,6 +62,8 @@ export function parseTaskInput(raw: string): ParsedTaskInput {
   let priority: TaskPriority = 'normal';
   let dueDate: Date | undefined;
   let reminderAt: Date | undefined;
+  let listHint: string | undefined;
+  let recurrence: TaskRecurrence | undefined;
 
   if (text.startsWith('!!')) {
     priority = 'must_do_today';
@@ -74,6 +79,35 @@ export function parseTaskInput(raw: string): ParsedTaskInput {
 
   for (const token of tokens) {
     const lower = token.toLowerCase();
+
+    if (lower === 'p1' || lower === 'p0') {
+      priority = 'must_do_today';
+      continue;
+    }
+    if (lower === 'p2' || lower === 'p!') {
+      priority = 'important';
+      continue;
+    }
+    if (lower.startsWith('#') && lower.length > 1) {
+      listHint = token.slice(1);
+      continue;
+    }
+    if (lower === 'daily' || lower === 'everyday') {
+      recurrence = 'daily';
+      continue;
+    }
+    if (lower === 'weekly') {
+      recurrence = 'weekly';
+      continue;
+    }
+    if (lower === 'monthly') {
+      recurrence = 'monthly';
+      continue;
+    }
+    if (lower === 'yearly' || lower === 'annually') {
+      recurrence = 'yearly';
+      continue;
+    }
 
     if (lower === 'today') {
       baseDay = startOfDay(new Date());
@@ -127,5 +161,7 @@ export function parseTaskInput(raw: string): ParsedTaskInput {
     priority,
     dueDate: dueDate?.toISOString(),
     reminderAt: reminderAt?.toISOString(),
+    listHint,
+    recurrence,
   };
 }

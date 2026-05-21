@@ -21,6 +21,9 @@ export default function ScheduleScreen() {
   const addTask = useTaskStore((s) => s.addTask);
   const completeTask = useTaskStore((s) => s.completeTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
+  const deleteTask = useTaskStore((s) => s.deleteTask);
+  const setImportant = useTaskStore((s) => s.setImportant);
+  const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
 
   useFocusEffect(
@@ -88,6 +91,21 @@ export default function ScheduleScreen() {
             await archiveTask(id);
           }}
           onMoveTomorrow={moveToTomorrow}
+          onDelete={(id) => {
+            Alert.alert('Delete task?', 'This cannot be undone.', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  await triggerLightHaptic();
+                  await deleteTask(id);
+                },
+              },
+            ]);
+          }}
+          onSetImportant={setImportant}
+          onToggleRecurring={toggleRecurring}
           ListFooterExtra={
             <View style={styles.adWrap}>
               <AdSlot placement="schedule_bottom" />

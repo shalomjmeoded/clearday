@@ -9,7 +9,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
-import { radius } from '@/theme/spacing';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { TaskPriority } from '@/types/task';
 
@@ -83,15 +82,15 @@ export function TaskCheckbox({ checked, priority, onPress }: Props) {
 const styles = StyleSheet.create({
   hit: { marginTop: 1 },
   box: {
-    width: 28,
-    height: 28,
-    borderRadius: radius.sm,
+    width: 30,
+    height: 30,
+    borderRadius: 6,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  fill: { borderRadius: radius.sm - 2 },
+  fill: { borderRadius: 4 },
   dot: {
     position: 'absolute',
     right: -3,

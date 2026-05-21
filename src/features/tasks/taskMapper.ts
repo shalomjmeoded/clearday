@@ -9,6 +9,7 @@ export function mapRowToTask(row: Record<string, unknown>): Task {
     notes: (row.notes as string) ?? undefined,
     status: row.status as Task['status'],
     priority: row.priority as Task['priority'],
+    color: (row.color as string) ?? undefined,
     dueDate: (row.dueDate as string) ?? undefined,
     reminderAt: (row.reminderAt as string) ?? undefined,
     recurrence,

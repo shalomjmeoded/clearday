@@ -4,10 +4,20 @@ import type { TaskList } from '@/types/list';
 import { createId } from '@/utils/id';
 import { nowIso } from '@/utils/dates';
 
+export const LIST_COLORS = [
+  '#4F6B52',
+  '#356C8C',
+  '#8A5D8F',
+  '#B85C4A',
+  '#9B7A34',
+  '#5E6F91',
+];
+
 function rowToList(row: Record<string, unknown>): TaskList {
   return {
     id: row.id as string,
     name: row.name as string,
+    color: (row.color as string) ?? undefined,
     sortOrder: row.sortOrder as number,
     createdAt: row.createdAt as string,
     updatedAt: row.updatedAt as string,
@@ -51,13 +61,14 @@ export const listRepository = {
     const list: TaskList = {
       id: createId(),
       name: name.trim(),
+      color: LIST_COLORS[((row?.maxOrder ?? 0) + 1) % LIST_COLORS.length],
       sortOrder: (row?.maxOrder ?? 0) + 1,
       createdAt: now,
       updatedAt: now,
     };
     await db.runAsync(
-      'INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-      [list.id, list.name, list.sortOrder, list.createdAt, list.updatedAt]
+      'INSERT INTO lists (id, name, color, sortOrder, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      [list.id, list.name, list.color ?? null, list.sortOrder, list.createdAt, list.updatedAt]
     );
     return list;
   },
@@ -72,6 +83,20 @@ export const listRepository = {
     await db.runAsync(
       'UPDATE lists SET name = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
       [trimmed, now, id]
+    );
+    const list = await listRepository.getById(id);
+    if (!list) {
+      throw new Error('List not found.');
+    }
+    return list;
+  },
+
+  async updateColor(id: string, color: string): Promise<TaskList> {
+    const db = await getDb();
+    const now = nowIso();
+    await db.runAsync(
+      'UPDATE lists SET color = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
+      [color, now, id]
     );
     const list = await listRepository.getById(id);
     if (!list) {

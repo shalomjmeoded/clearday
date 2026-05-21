@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, TextInput, type StyleProp, type ViewStyle } from 'react-native';
 
 import { BottomInputBar } from './BottomInputBar';
 import { BottomBarInsetProvider } from './BottomBarInsetContext';
@@ -15,6 +15,8 @@ interface Props {
   aboveTabBar?: boolean;
   header?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  inputRef?: React.RefObject<TextInput | null>;
+  showInputBar?: boolean;
 }
 
 /**
@@ -28,10 +30,12 @@ export function ScreenWithBottomBar({
   aboveTabBar = false,
   header,
   style,
+  inputRef,
+  showInputBar = true,
 }: Props) {
   const { listBottomInset } = useScreenInsets({
     variant: aboveTabBar ? 'tab' : 'stack',
-    hasBottomBar: true,
+    hasBottomBar: showInputBar,
     aboveTabBar,
   });
 
@@ -43,11 +47,14 @@ export function ScreenWithBottomBar({
           {children}
         </BottomBarInsetProvider>
       </KeyboardDismissView>
-      <BottomInputBar
-        aboveTabBar={aboveTabBar}
-        onSubmit={onSubmit}
-        placeholder={placeholder}
-      />
+      {showInputBar ? (
+        <BottomInputBar
+          aboveTabBar={aboveTabBar}
+          onSubmit={onSubmit}
+          placeholder={placeholder}
+          inputRef={inputRef}
+        />
+      ) : null}
     </Screen>
   );
 }

@@ -3,6 +3,7 @@ export const MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS lists (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
+  color TEXT,
   sortOrder INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   notes TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   priority TEXT NOT NULL DEFAULT 'normal',
+  color TEXT,
   dueDate TEXT,
   reminderAt TEXT,
   recurrence TEXT NOT NULL DEFAULT 'none',

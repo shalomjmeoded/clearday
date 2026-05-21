@@ -19,17 +19,31 @@ async function seedDefaults(): Promise<void> {
     [INBOX_LIST_ID]
   );
   if (!inbox) {
-    await db.runAsync(
-      'INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-      [INBOX_LIST_ID, 'Inbox', 0, now, now]
+    const columns = await db.getAllAsync<{ name: string }>(
+      'PRAGMA table_info(lists)'
     );
+    const hasColor = columns.some((c) => c.name === 'color');
+    if (hasColor) {
+      await db.runAsync(
+        'INSERT INTO lists (id, name, color, sortOrder, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+        [INBOX_LIST_ID, 'Inbox', '#4F6B52', 0, now, now]
+      );
+    } else {
+      await db.runAsync(
+        'INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
+        [INBOX_LIST_ID, 'Inbox', 0, now, now]
+      );
+    }
   }
 
   const settingsRows: [string, string][] = [
     ['theme', DEFAULT_SETTINGS.theme],
+    ['colorTheme', DEFAULT_SETTINGS.colorTheme],
     ['hapticsEnabled', String(DEFAULT_SETTINGS.hapticsEnabled)],
     ['completedTaskBehavior', DEFAULT_SETTINGS.completedTaskBehavior],
     ['defaultReminderTime', DEFAULT_SETTINGS.defaultReminderTime],
+    ['swipeLeftAction', DEFAULT_SETTINGS.swipeLeftAction],
+    ['swipeRightAction', DEFAULT_SETTINGS.swipeRightAction],
     ['defaultListId', DEFAULT_SETTINGS.defaultListId],
     ['isPro', String(DEFAULT_SETTINGS.isPro)],
     ['schemaVersion', String(SCHEMA_VERSION)],
@@ -54,7 +68,6 @@ async function migrateToV2(db: Awaited<ReturnType<typeof getDb>>): Promise<void>
     "SELECT value FROM settings WHERE key = 'schemaVersion'"
   );
   const version = parseInt(row?.value ?? '1', 10);
-  if (version >= 2) return;
 
   const columns = await db.getAllAsync<{ name: string }>(
     'PRAGMA table_info(tasks)'
@@ -65,6 +78,54 @@ async function migrateToV2(db: Awaited<ReturnType<typeof getDb>>): Promise<void>
       `ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'none'`
     );
   }
+  if (version >= 2) return;
+
+  await db.runAsync(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('schemaVersion', ?)",
+    [String(SCHEMA_VERSION)]
+  );
+}
+
+async function migrateToV3(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
+  const row = await db.getFirstAsync<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'schemaVersion'"
+  );
+  const version = parseInt(row?.value ?? '1', 10);
+
+  const columns = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(lists)'
+  );
+  const hasColor = columns.some((c) => c.name === 'color');
+  if (!hasColor) {
+    await db.execAsync('ALTER TABLE lists ADD COLUMN color TEXT');
+  }
+
+  await db.runAsync(
+    "UPDATE lists SET color = COALESCE(color, ?) WHERE id = ?",
+    ['#4F6B52', INBOX_LIST_ID]
+  );
+  if (version >= 3) return;
+
+  await db.runAsync(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('schemaVersion', ?)",
+    [String(SCHEMA_VERSION)]
+  );
+}
+
+async function migrateToV4(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
+  const row = await db.getFirstAsync<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'schemaVersion'"
+  );
+  const version = parseInt(row?.value ?? '1', 10);
+
+  const columns = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(tasks)'
+  );
+  const hasColor = columns.some((c) => c.name === 'color');
+  if (!hasColor) {
+    await db.execAsync('ALTER TABLE tasks ADD COLUMN color TEXT');
+  }
+  if (version >= 4) return;
 
   await db.runAsync(
     "INSERT OR REPLACE INTO settings (key, value) VALUES ('schemaVersion', ?)",
@@ -77,4 +138,6 @@ export async function initDatabase(): Promise<void> {
   await db.execAsync(MIGRATION_SQL);
   await seedDefaults();
   await migrateToV2(db);
+  await migrateToV3(db);
+  await migrateToV4(db);
 }

@@ -17,6 +17,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { TextField } from '@/components/ui/TextField';
 import { getIsPro } from '@/features/pro/subscriptionService';
 import { INBOX_LIST_ID } from '@/db/constants';
+import { LIST_COLORS } from '@/features/lists/listRepository';
 import {
   areLocalNotificationsSupported,
   requestReminderPermission,
@@ -69,6 +70,7 @@ export default function TaskDetailScreen() {
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('normal');
+  const [color, setColor] = useState<string | undefined>();
   const [listId, setListId] = useState(INBOX_LIST_ID);
   const [reminderAt, setReminderAt] = useState<string | undefined>();
   const [dueDate, setDueDate] = useState<string | undefined>();
@@ -108,6 +110,7 @@ export default function TaskDetailScreen() {
         setTitle(t.title);
         setNotes(t.notes ?? '');
         setPriority(t.priority);
+        setColor(t.color);
         setListId(t.listId ?? INBOX_LIST_ID);
         setReminderAt(t.reminderAt);
         setDueDate(t.dueDate);
@@ -138,6 +141,7 @@ export default function TaskDetailScreen() {
         title: trimmed,
         notes: notes.trim() || undefined,
         priority: resolvedPriority,
+        color,
         listId,
         dueDate: task?.status === 'active' ? dueDate : undefined,
         reminderAt: task?.status === 'active' ? reminderAt : undefined,
@@ -340,6 +344,46 @@ export default function TaskDetailScreen() {
         </View>
 
         <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+          COLOR
+        </Text>
+        <View style={styles.swatches}>
+          <Pressable
+            onPress={async () => {
+              await triggerLightHaptic();
+              setColor(undefined);
+            }}
+            style={[
+              styles.noColorSwatch,
+              {
+                borderColor: color ? tokens.border : tokens.text,
+                backgroundColor: tokens.card,
+              },
+            ]}
+          >
+            <Text style={[typography.meta, { color: tokens.mutedText }]}>Auto</Text>
+          </Pressable>
+          {LIST_COLORS.map((swatch) => (
+            <Pressable
+              key={swatch}
+              onPress={async () => {
+                await triggerLightHaptic();
+                setColor(swatch);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Choose task color"
+              style={[
+                styles.swatch,
+                {
+                  backgroundColor: swatch,
+                  borderColor: color === swatch ? tokens.text : tokens.border,
+                },
+                color === swatch && styles.swatchSelected,
+              ]}
+            />
+          ))}
+        </View>
+
+        <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
           LIST
         </Text>
         <View style={styles.row}>
@@ -517,6 +561,30 @@ const styles = StyleSheet.create({
   },
   dueLabel: { marginBottom: spacing.sm },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
+  swatches: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  swatch: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+  },
+  noColorSwatch: {
+    minHeight: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatchSelected: {
+    transform: [{ scale: 1.05 }],
+  },
   chip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
