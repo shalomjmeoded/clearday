@@ -12,12 +12,11 @@ import {
 import { FormScreen } from '@/components/layout/FormScreen';
 import { Screen } from '@/components/layout/Screen';
 import { ReminderTimePicker } from '@/components/reminders/ReminderTimePicker';
-import { ScheduleDatePicker } from '@/components/tasks/ScheduleDatePicker';
+import { CalendarDatePicker } from '@/components/tasks/CalendarDatePicker';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { TextField } from '@/components/ui/TextField';
-import { getIsPro } from '@/features/pro/subscriptionService';
+import { TASK_COLORS } from '@/constants/taskColors';
 import { INBOX_LIST_ID } from '@/db/constants';
-import { LIST_COLORS } from '@/features/lists/listRepository';
 import {
   areLocalNotificationsSupported,
   requestReminderPermission,
@@ -41,7 +40,7 @@ import {
   buildReminderIso,
   getHoursMinutesFromIso,
 } from '@/utils/reminderTime';
-import { triggerLightHaptic } from '@/utils/haptics';
+import { triggerLightHaptic, triggerSuccessHaptic } from '@/utils/haptics';
 import { paramString } from '@/utils/routeParams';
 import { tomorrowIso } from '@/utils/scheduleDates';
 
@@ -60,6 +59,8 @@ export default function TaskDetailScreen() {
   const refreshAll = useTaskStore((s) => s.refreshAll);
   const refreshList = useTaskStore((s) => s.refreshList);
   const archiveTask = useTaskStore((s) => s.archiveTask);
+  const completeTask = useTaskStore((s) => s.completeTask);
+  const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const scheduleTask = useTaskStore((s) => s.scheduleTask);
   const defaultReminderTime = useSettingsStore(
     (s) => s.settings.defaultReminderTime
@@ -81,7 +82,7 @@ export default function TaskDetailScreen() {
   const [reminderPickerMinutes, setReminderPickerMinutes] = useState(0);
   const [titleError, setTitleError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
-  const isPro = getIsPro();
+  const isPro = useSettingsStore((s) => s.settings.isPro);
 
   const refreshViews = useCallback(
     async (previousListId?: string) => {
@@ -92,6 +93,31 @@ export default function TaskDetailScreen() {
       }
     },
     [refreshAll, refreshList, listId]
+  );
+
+  const moveTaskToList = useCallback(
+    async (nextListId: string) => {
+      if (!taskId || nextListId === listId) return;
+      const previousListId = listId;
+      await triggerLightHaptic();
+      setListId(nextListId);
+      setTask((current) => (current ? { ...current, listId: nextListId } : current));
+      try {
+        await taskRepository.update(taskId, { listId: nextListId });
+        await refreshAll();
+        await refreshList(nextListId);
+        if (previousListId !== nextListId) {
+          await refreshList(previousListId);
+        }
+      } catch {
+        setListId(previousListId);
+        setTask((current) =>
+          current ? { ...current, listId: previousListId } : current
+        );
+        Alert.alert('Could not move', 'Please try again.');
+      }
+    },
+    [listId, refreshAll, refreshList, taskId]
   );
 
   useEffect(() => {
@@ -236,17 +262,6 @@ export default function TaskDetailScreen() {
 
   const pickDate = () => {
     Keyboard.dismiss();
-    if (!isPro) {
-      Alert.alert(
-        'ClearDay Pro',
-        'Choose any future date with Pro. Free can use Tomorrow or type dates when adding tasks.',
-        [
-          { text: 'Not now', style: 'cancel' },
-          { text: 'View Pro', onPress: () => router.push('/pro') },
-        ]
-      );
-      return;
-    }
     setShowDatePicker(true);
   };
 
@@ -266,6 +281,34 @@ export default function TaskDetailScreen() {
     await taskRepository.update(taskId, { dueDate: undefined });
     await refreshViews(task?.listId);
     setTask((prev) => (prev ? { ...prev, dueDate: undefined } : prev));
+  };
+
+  const reloadTask = async () => {
+    if (!taskId) return;
+    const updated = await taskRepository.getById(taskId);
+    if (!updated) return;
+    setTask(updated);
+    setTitle(updated.title);
+    setNotes(updated.notes ?? '');
+    setPriority(updated.priority);
+    setColor(updated.color);
+    setListId(updated.listId ?? INBOX_LIST_ID);
+    setReminderAt(updated.reminderAt);
+    setDueDate(updated.dueDate);
+    setRecurrence(updated.recurrence ?? DEFAULT_RECURRENCE);
+  };
+
+  const toggleDone = async () => {
+    if (!taskId || !task) return;
+    if (task.status === 'completed') {
+      await triggerLightHaptic();
+      await uncompleteTask(taskId);
+    } else {
+      await triggerSuccessHaptic();
+      await completeTask(taskId);
+    }
+    await refreshViews(task.listId);
+    await reloadTask();
   };
 
   if (!loaded) {
@@ -315,13 +358,16 @@ export default function TaskDetailScreen() {
         />
 
         <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
-          PRIORITY
+          PRIORITY · {PRIORITIES.find((p) => p.key === priority)?.label ?? 'Normal'}
         </Text>
         <View style={styles.row}>
           {PRIORITIES.map((p) => (
             <Pressable
               key={p.key}
-              onPress={() => setPriority(p.key)}
+              onPress={async () => {
+                await triggerLightHaptic();
+                setPriority(p.key);
+              }}
               style={[
                 styles.chip,
                 {
@@ -362,22 +408,22 @@ export default function TaskDetailScreen() {
           >
             <Text style={[typography.meta, { color: tokens.mutedText }]}>Auto</Text>
           </Pressable>
-          {LIST_COLORS.map((swatch) => (
+          {TASK_COLORS.map((item) => (
             <Pressable
-              key={swatch}
+              key={item.key}
               onPress={async () => {
                 await triggerLightHaptic();
-                setColor(swatch);
+                setColor(item.value);
               }}
               accessibilityRole="button"
-              accessibilityLabel="Choose task color"
+              accessibilityLabel={`Choose ${item.label}`}
               style={[
                 styles.swatch,
                 {
-                  backgroundColor: swatch,
-                  borderColor: color === swatch ? tokens.text : tokens.border,
+                  backgroundColor: item.value,
+                  borderColor: color === item.value ? tokens.text : tokens.border,
                 },
-                color === swatch && styles.swatchSelected,
+                color === item.value && styles.swatchSelected,
               ]}
             />
           ))}
@@ -390,7 +436,7 @@ export default function TaskDetailScreen() {
           {lists.map((list) => (
             <Pressable
               key={list.id}
-              onPress={() => setListId(list.id)}
+              onPress={() => moveTaskToList(list.id)}
               style={[
                 styles.chip,
                 {
@@ -433,9 +479,7 @@ export default function TaskDetailScreen() {
                 onPress={pickDate}
                 style={[styles.chip, { borderColor: tokens.accent, backgroundColor: tokens.card }]}
               >
-                <Text style={{ color: tokens.accent, fontSize: 14 }}>
-                  {isPro ? 'Choose date' : 'Choose date (Pro)'}
-                </Text>
+                <Text style={{ color: tokens.accent, fontSize: 14 }}>Choose date</Text>
               </Pressable>
               {dueDate ? (
                 <Pressable
@@ -466,7 +510,7 @@ export default function TaskDetailScreen() {
             ) : null}
 
             <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
-              REPEAT
+              REPEAT · {formatRecurrenceLabel(recurrence)}
             </Text>
             {isRecurring(recurrence) && !dueDate ? (
               <Text style={[typography.meta, styles.recurrenceHint, { color: tokens.mutedText }]}>
@@ -477,7 +521,21 @@ export default function TaskDetailScreen() {
               {RECURRENCE_OPTIONS.map((option) => (
                 <Pressable
                   key={option.key}
-                  onPress={() => setRecurrence(option.key)}
+                  onPress={async () => {
+                    if (option.key !== 'none' && !isPro) {
+                      Alert.alert(
+                        'Do! Pro',
+                        'Recurring tasks are included with Pro.',
+                        [
+                          { text: 'Not now', style: 'cancel' },
+                          { text: 'View Pro', onPress: () => router.push('/pro') },
+                        ]
+                      );
+                      return;
+                    }
+                    await triggerLightHaptic();
+                    setRecurrence(option.key);
+                  }}
                   style={[
                     styles.chip,
                     {
@@ -516,8 +574,9 @@ export default function TaskDetailScreen() {
           onConfirm={applyReminderTime}
         />
 
-        <ScheduleDatePicker
+        <CalendarDatePicker
           visible={showDatePicker}
+          selectedDate={dueDate}
           onClose={() => setShowDatePicker(false)}
           onSelect={onDatePicked}
         />
@@ -526,6 +585,12 @@ export default function TaskDetailScreen() {
           label={saving ? 'Saving…' : 'Save'}
           onPress={save}
           disabled={saving}
+        />
+
+        <PrimaryButton
+          label={task.status === 'completed' ? 'Mark as to-do' : 'Mark done'}
+          onPress={toggleDone}
+          variant="ghost"
         />
 
         <View style={styles.destructiveSection}>

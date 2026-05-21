@@ -51,7 +51,7 @@ export default function MoreScreen() {
   const { tokens } = useTheme();
   const isPro = useSettingsStore((s) => s.settings.isPro);
 
-  const open = async (path: '/settings' | '/pro') => {
+  const open = async (path: '/settings' | '/pro' | '/finished' | '/help') => {
     await triggerSelectionHaptic();
     router.push(path);
   };
@@ -67,10 +67,16 @@ export default function MoreScreen() {
           { backgroundColor: tokens.card, borderColor: tokens.border },
         ]}
       >
+        <LinkRow
+          label="Finished Tasks"
+          subtitle="History of completed tasks"
+          onPress={() => open('/finished')}
+        />
+        <LinkRow label="Help" onPress={() => open('/help')} />
         <LinkRow label="Settings" onPress={() => open('/settings')} />
         <LinkRow
-          label="ClearDay Pro"
-          subtitle={isPro ? 'Pro active' : 'Make it yours.'}
+          label="Do! Pro"
+          subtitle={isPro ? 'Pro active' : 'Make Do! yours.'}
           onPress={() => open('/pro')}
           last
         />

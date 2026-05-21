@@ -4,11 +4,15 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 
 import { BootstrapScreen } from '@/components/layout/BootstrapScreen';
 import { ThemedRoot } from '@/components/layout/ThemedRoot';
+import {
+  SPLASH_BACKGROUND_DARK,
+  SPLASH_BACKGROUND_LIGHT,
+} from '@/constants/brandAssets';
 import { initDatabase } from '@/db/migrations';
 import { initReminders } from '@/features/reminders/reminderService';
 import {
@@ -20,7 +24,6 @@ import { useListStore } from '@/store/listStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { buildNavigationTheme } from '@/theme/navigationTheme';
-import { lightTheme } from '@/theme/tokens';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 
 SplashScreen.preventAutoHideAsync();
@@ -38,7 +41,7 @@ function AppNavigator() {
     () => modalScreenOptions(tokens, 'Settings'),
     [tokens]
   );
-  const proModalOpts = useMemo(() => modalScreenOptions(tokens, 'ClearDay Pro'), [tokens]);
+  const proModalOpts = useMemo(() => modalScreenOptions(tokens, 'Do! Pro'), [tokens]);
   const focusModalOpts = useMemo(() => fullScreenModalOptions(tokens), [tokens]);
 
   return (
@@ -50,23 +53,20 @@ function AppNavigator() {
         <Stack.Screen name="focus" options={focusModalOpts} />
         <Stack.Screen name="settings" options={settingsModalOpts} />
         <Stack.Screen name="pro" options={proModalOpts} />
+        <Stack.Screen name="help" options={settingsModalOpts} />
+        <Stack.Screen name="finished" options={settingsModalOpts} />
+        <Stack.Screen name="recurring" options={settingsModalOpts} />
         <Stack.Screen name="lists/[listId]" />
       </Stack>
     </NavigationThemeProvider>
   );
 }
 
-function RootShell({ ready }: { ready: boolean }) {
-  return (
-    <ThemedRoot>
-      {ready ? <AppNavigator /> : <BootstrapScreen />}
-    </ThemedRoot>
-  );
-}
-
 export default function RootLayout() {
-  const [hydrated, setHydrated] = useState(false);
   const [ready, setReady] = useState(false);
+  const colorScheme = useColorScheme();
+  const rootBackground =
+    colorScheme === 'dark' ? SPLASH_BACKGROUND_DARK : SPLASH_BACKGROUND_LIGHT;
 
   useEffect(() => {
     async function bootstrap() {
@@ -74,12 +74,10 @@ export default function RootLayout() {
         await initDatabase();
         await initReminders();
         await useSettingsStore.getState().hydrate();
-        setHydrated(true);
         await useTaskStore.getState().refreshAll();
         await useListStore.getState().refresh();
       } catch (error) {
-        console.error('ClearDay bootstrap failed:', error);
-        setHydrated(true);
+        console.error('Do! bootstrap failed:', error);
       } finally {
         setReady(true);
         await SplashScreen.hideAsync();
@@ -88,15 +86,13 @@ export default function RootLayout() {
     bootstrap();
   }, []);
 
-  if (!hydrated) {
-    return null;
-  }
-
   return (
-    <GestureHandlerRootView style={styles.root}>
+    <GestureHandlerRootView style={[styles.root, { backgroundColor: rootBackground }]}>
       <KeyboardProvider>
         <ThemeProvider>
-          <RootShell ready={ready} />
+          <ThemedRoot>
+            {ready ? <AppNavigator /> : <BootstrapScreen />}
+          </ThemedRoot>
         </ThemeProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>
@@ -106,6 +102,5 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: lightTheme.background,
   },
 });

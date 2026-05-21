@@ -1,6 +1,8 @@
-# ClearDay
+# Do!
 
-A minimalist, calm, local-first to-do app for iOS and Android.
+Minimalist, private Todo list app for iOS and Android.
+
+**Your tasks stay on your phone. We do not upload, read, sell, or share your task data.**
 
 ## Run
 
@@ -47,30 +49,26 @@ Default settings: system theme, haptics on, completed tasks collapsed, reminder 
 
 ## Free vs Pro (mock)
 
-**Free:** Today, schedule, focus, basic reminders, inbox + one custom list, themes, local SQLite storage, done history, subtle mock ads (Today, Schedule, Lists only).
+**Free:** Today, All, Tomorrow/Later, focus, basic reminders, inbox + one custom list, themes, local storage, finished tasks, 0 ads.
 
-**Pro (mock):** Today — no ads, unlimited lists, calendar due-date picker on tasks. Paywall lists other benefits under **Coming soon** (not built yet).
+**Pro (mock):** Unlimited lists and Pro-gated features. Paywall lists planned benefits; toggle **Mock Pro enabled** on the Pro screen (persists in SQLite).
 
-Open **More → ClearDay Pro** → **Mock Pro enabled** (persists in SQLite).
+Open **More → Do! Pro** → **Mock Pro enabled** (persists in SQLite).
 
 **Restore purchases** shows a placeholder until RevenueCat is integrated.
-
-## Ads (free users only)
-
-- Native-style mock cards, max one per screen
-- No ads in task detail, settings, Pro, Focus, or while typing
-- Hidden when `isPro` is true
 
 ## Subscriptions (future)
 
 `src/features/pro/subscriptionService.ts` defines `SubscriptionProvider` for swapping mock → RevenueCat later.
-
-## Backup (future)
-
-Types in `src/types/backup.ts` — export/import UI in Settings marked Coming soon.
 
 ## Privacy copy
 
 Shared strings in `src/constants/privacyCopy.ts`. Store listing draft: `docs/app-store-listing.md`.
 
 Main line: *Your tasks stay on your phone. We do not upload, read, sell, or share your task data.*
+
+## Brand assets
+
+Expo icons and splash live in `assets/images/`. Source SVGs in `assets/svg/`.
+
+Light splash background: `#F6F1E8`. Dark splash background: `#111820`.

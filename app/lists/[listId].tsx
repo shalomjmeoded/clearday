@@ -9,6 +9,7 @@ import { TaskList } from '@/components/tasks/TaskList';
 import { listRepository } from '@/features/lists/listRepository';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
+import type { QuickAddOptions } from '@/types/quickAdd';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import { triggerLightHaptic, triggerSuccessHaptic } from '@/utils/haptics';
@@ -25,6 +26,7 @@ export default function ListDetailScreen() {
   const refreshList = useTaskStore((s) => s.refreshList);
   const addTask = useTaskStore((s) => s.addTask);
   const completeTask = useTaskStore((s) => s.completeTask);
+  const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const setImportant = useTaskStore((s) => s.setImportant);
@@ -100,7 +102,7 @@ export default function ListDetailScreen() {
   return (
     <ScreenWithBottomBar
       header={header}
-      onSubmit={(text) => addTask(text, listId)}
+      onSubmit={(text, options) => addTask(text, listId, options)}
     >
       <TaskList
         activeTasks={listTasks}
@@ -110,6 +112,10 @@ export default function ListDetailScreen() {
         onComplete={async (id) => {
           await triggerSuccessHaptic();
           await completeTask(id);
+        }}
+        onUncomplete={async (id) => {
+          await triggerLightHaptic();
+          await uncompleteTask(id);
         }}
         onPress={(id) => router.push(`/task/${id}`)}
         onArchive={async (id) => {
@@ -132,7 +138,6 @@ export default function ListDetailScreen() {
         }}
         onSetImportant={setImportant}
         onToggleRecurring={toggleRecurring}
-        onEndManualSort={() => setReorderMode(false)}
         onReorder={(orderedIds) => reorderTasks(orderedIds, listId)}
         reorderMode={reorderMode}
       />

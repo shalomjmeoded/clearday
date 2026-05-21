@@ -4,30 +4,49 @@ Use this privacy line in the store description and privacy policy summary:
 
 **Your tasks stay on your phone. We do not upload, read, sell, or share your task data.**
 
+## App name
+
+Do!
+
+## Subtitle (suggested)
+
+Minimalist, private Todo list app
+
 ## Short description (suggested)
 
-ClearDay is a calm, local-first to-do app. Tasks are stored on your device in a private SQLite database — no account required for the core app.
+Do! is a calm, minimalist to-do app. Tasks are stored locally on your phone — no account required.
 
 ## Full description (draft)
 
-ClearDay helps you focus on today without clutter. Add tasks, schedule what matters, and use Focus Mode when you need a simple list in front of you.
+Do! helps you focus on today without clutter. Add tasks, schedule what matters, and use Focus Mode when you need a simple list in front of you.
+
+Simple by design. Private on your phone. No ads.
 
 **Privacy**
 
 Your tasks stay on your phone. We do not upload, read, sell, or share your task data.
 
-Tasks are stored locally on your device. Export and import backup files from Settings. Deleting the app without a backup may remove local tasks.
+Your tasks are stored locally on this device. Export a backup before deleting the app or moving to a new phone.
 
 **Free**
 
-Today, schedule, focus, reminders, one custom list, themes, and subtle sponsored placements.
+Today list, All list, Tomorrow/Later, Focus Mode, basic reminders, one custom list, light/dark/system theme, local storage, finished tasks, 0 ads, and private on-device task storage.
 
 **Pro (subscriptions coming)**
 
-Included when Pro ships: no ads, unlimited lists, choose any due date on a task.
+Everything in Free, plus unlimited lists, recurring tasks, advanced reminders, widgets, premium themes, custom app icons, backup/export, future cloud sync, shared lists, voice capture, smarter parsing, and completion insights.
 
-Backup export/import is available to all users. Cloud sync is not available yet — use Export on one device and Import on another.
+Backup export/import is available to all users today. Cloud sync is not available yet — use Export on one device and Import on another.
 
-Planned later: widgets, premium themes, automatic cloud sync, and more.
+Do not claim automatic cloud sync or end-to-end encryption until those features ship.
 
-Do not claim cloud sync, backup, or end-to-end encryption in store copy until those features ship.
+## Keywords (suggested)
+
+todo, tasks, minimalist, private, local, offline, no ads, simple, focus, list
+
+## Manual steps before submission
+
+- Confirm iOS bundle identifier (`com.clearday.app` in app.json today — update to production ID when ready)
+- Confirm Android package name (`com.clearday.app` in app.json today — update to production ID when ready)
+- Upload new Do! icon and splash screenshots from `assets/images/`
+- Set store listing subtitle to: Minimalist, private Todo list app

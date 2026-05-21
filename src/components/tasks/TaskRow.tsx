@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   type LayoutChangeEvent,
   Pressable,
@@ -7,28 +7,25 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import Animated, {
   interpolate,
-  LinearTransition,
-  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { Swipeable } from 'react-native-gesture-handler';
 
 import { usePressHoldFeedback } from '@/hooks/usePressHoldFeedback';
-import { triggerMediumHaptic } from '@/utils/haptics';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
-import {
-  formatDisplayDate,
-  formatTime,
-  isOverdue,
-} from '@/utils/dates';
+import { formatTime } from '@/utils/dates';
+import { formatTaskSideDate } from '@/utils/formatTaskSideDate';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
+
+const SWIPE_ACTIVE_OFFSET_X: [number, number] = [-10, 10];
+const SWIPE_FAIL_OFFSET_Y: [number, number] = [-20, 20];
 
 interface Props {
   task: Task;
@@ -40,24 +37,12 @@ interface Props {
   onDelete: () => void;
   onPin: () => void;
   onToggleRecurring: () => void;
-  reorderMode?: boolean;
-  disableLayoutAnimation?: boolean;
-  hiddenPlaceholder?: boolean;
-  rowIndex?: number;
-  activeDragIndex?: SharedValue<number>;
-  hoverDragIndex?: SharedValue<number>;
-  dragTranslationY?: SharedValue<number>;
-  dragRowHeight?: SharedValue<number>;
-  canMoveUp?: boolean;
-  canMoveDown?: boolean;
-  onDragStart?: () => void;
-  onDragMove?: (translationY: number) => void;
-  onDragEnd?: (translationY: number) => void;
+  onDragActivate?: () => void;
+  isDragging?: boolean;
+  swipeEnabled?: boolean;
   onRowLayout?: (layout: { height: number; width: number; y: number }) => void;
   compact?: boolean;
 }
-
-const REORDER_STEP = 46;
 
 function TaskRowInner({
   task,
@@ -69,63 +54,68 @@ function TaskRowInner({
   onDelete,
   onPin,
   onToggleRecurring,
-  reorderMode = false,
-  disableLayoutAnimation = false,
-  hiddenPlaceholder = false,
-  rowIndex = -1,
-  activeDragIndex,
-  hoverDragIndex,
-  dragTranslationY,
-  dragRowHeight,
-  canMoveUp = false,
-  canMoveDown = false,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
+  onDragActivate,
+  isDragging = false,
+  swipeEnabled = true,
   onRowLayout,
   compact = false,
 }: Props) {
   const { tokens } = useTheme();
+  const swipeRef = useRef<Swipeable>(null);
+  const lastContentTapAt = useRef(0);
+  const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completed = task.status === 'completed';
   const progress = useSharedValue(completed ? 1 : 0);
-  const locallyDragging = useSharedValue(0);
-  const dragDistance = useRef(0);
-  const dragActive = useRef(false);
-  const onDragStartRef = useRef(onDragStart);
-  const onDragMoveRef = useRef(onDragMove);
-  const onDragEndRef = useRef(onDragEnd);
   const { animatedStyle: holdStyle, pressIn, pressOut } = usePressHoldFeedback();
   const isMust = task.priority === 'must_do_today' && !completed;
+  const sideDate = formatTaskSideDate(task.dueDate);
+  const dragEnabled = Boolean(onDragActivate) && !completed;
+  const showPin = task.priority === 'important' || task.priority === 'must_do_today';
 
-  const openTask = () => {
-    if (reorderMode || dragActive.current) return;
+  const openTask = useCallback(() => {
+    if (isDragging) return;
     void onPress();
-  };
+  }, [isDragging, onPress]);
 
-  useEffect(() => {
-    onDragStartRef.current = onDragStart;
-    onDragMoveRef.current = onDragMove;
-    onDragEndRef.current = onDragEnd;
-  }, [onDragEnd, onDragMove, onDragStart]);
+  const handleContentPress = useCallback(() => {
+    if (isDragging) return;
 
-  const resetDrag = useCallback((translationY = 0) => {
-    dragDistance.current = 0;
-    dragActive.current = false;
-    onDragEndRef.current?.(translationY);
-    locallyDragging.value = withTiming(0, { duration: 120 });
-  }, [locallyDragging]);
+    pressIn();
+    const now = Date.now();
 
-  const beginDrag = useCallback(() => {
-    if (dragActive.current) return;
-    dragDistance.current = 0;
-    dragActive.current = true;
-    locallyDragging.value = 1;
-    onDragStartRef.current?.();
-  }, [locallyDragging]);
+    if (now - lastContentTapAt.current < 260) {
+      if (singleTapTimer.current) {
+        clearTimeout(singleTapTimer.current);
+        singleTapTimer.current = null;
+      }
+      lastContentTapAt.current = 0;
+      onComplete();
+      pressOut();
+      return;
+    }
 
-  const handlePressOut = () => {
-    pressOut();
-  };
+    lastContentTapAt.current = now;
+    if (singleTapTimer.current) {
+      clearTimeout(singleTapTimer.current);
+    }
+    singleTapTimer.current = setTimeout(() => {
+      singleTapTimer.current = null;
+      if (lastContentTapAt.current === now) {
+        lastContentTapAt.current = 0;
+        openTask();
+      }
+      pressOut();
+    }, 260);
+  }, [isDragging, onComplete, openTask, pressIn, pressOut]);
+
+  useEffect(
+    () => () => {
+      if (singleTapTimer.current) {
+        clearTimeout(singleTapTimer.current);
+      }
+    },
+    []
+  );
 
   const handleLayout = (event: LayoutChangeEvent) => {
     onRowLayout?.(event.nativeEvent.layout);
@@ -139,35 +129,10 @@ function TaskRowInner({
     opacity: interpolate(progress.value, [0, 1], [1, 0.45]),
   }));
 
-  const dragStyle = useAnimatedStyle(() => {
-    const activeIndex = activeDragIndex?.value ?? -1;
-    const hoverIndex = hoverDragIndex?.value ?? -1;
-    const reorderStep = dragRowHeight?.value ?? REORDER_STEP;
-    let previewOffset = 0;
-
-    if (rowIndex >= 0 && activeIndex >= 0 && hoverIndex >= 0 && rowIndex !== activeIndex) {
-      if (activeIndex < hoverIndex && rowIndex > activeIndex && rowIndex <= hoverIndex) {
-        previewOffset = -reorderStep;
-      }
-      if (activeIndex > hoverIndex && rowIndex >= hoverIndex && rowIndex < activeIndex) {
-        previewOffset = reorderStep;
-      }
-    }
-
-    return {
-      opacity: hiddenPlaceholder || locallyDragging.value ? 0 : 1,
-      zIndex: locallyDragging.value ? 30 : 0,
-      elevation: locallyDragging.value ? 12 : 0,
-      transform: [
-        {
-          translateY: locallyDragging.value
-            ? 0
-            : withTiming(previewOffset, { duration: 120 }),
-        },
-        { scale: 1 },
-      ],
-    };
-  });
+  const runAction = (action: () => void) => {
+    swipeRef.current?.close();
+    action();
+  };
 
   const renderLeft = () => (
     <View style={styles.actionRail}>
@@ -175,7 +140,7 @@ function TaskRowInner({
         accessibilityRole="button"
         accessibilityLabel="Delete task"
         style={[styles.iconAction, { backgroundColor: tokens.danger }]}
-        onPress={onDelete}
+        onPress={() => runAction(onDelete)}
       >
         <Ionicons name="trash-outline" size={16} color="#fff" />
       </Pressable>
@@ -183,7 +148,7 @@ function TaskRowInner({
         accessibilityRole="button"
         accessibilityLabel="Edit task"
         style={[styles.iconAction, { backgroundColor: tokens.actionEdit }]}
-        onPress={onPress}
+        onPress={() => runAction(onPress)}
       >
         <Ionicons name="create-outline" size={16} color="#fff" />
       </Pressable>
@@ -191,7 +156,7 @@ function TaskRowInner({
         accessibilityRole="button"
         accessibilityLabel="Archive task"
         style={[styles.iconAction, { backgroundColor: tokens.swipeArchive }]}
-        onPress={onArchive}
+        onPress={() => runAction(onArchive)}
       >
         <Ionicons name="archive-outline" size={16} color="#fff" />
       </Pressable>
@@ -202,9 +167,11 @@ function TaskRowInner({
     <View style={styles.actionRail}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Pin task"
+        accessibilityLabel={
+          task.priority === 'important' ? 'Remove important' : 'Mark important'
+        }
         style={[styles.iconAction, { backgroundColor: tokens.actionPin }]}
-        onPress={onPin}
+        onPress={() => runAction(onPin)}
       >
         <Ionicons
           name={task.priority === 'important' ? 'star' : 'star-outline'}
@@ -214,9 +181,11 @@ function TaskRowInner({
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Repeat task"
+        accessibilityLabel={
+          isRecurring(task.recurrence) ? 'Stop repeating' : 'Repeat task'
+        }
         style={[styles.iconAction, { backgroundColor: tokens.actionRepeat }]}
-        onPress={onToggleRecurring}
+        onPress={() => runAction(onToggleRecurring)}
       >
         <Ionicons
           name={isRecurring(task.recurrence) ? 'repeat' : 'repeat-outline'}
@@ -226,9 +195,9 @@ function TaskRowInner({
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={completed ? 'Mark unread' : 'Mark read'}
+        accessibilityLabel={completed ? 'Mark as to-do' : 'Mark done'}
         style={[styles.iconAction, { backgroundColor: tokens.actionRead }]}
-        onPress={onComplete}
+        onPress={() => runAction(onComplete)}
       >
         <Ionicons
           name={completed ? 'mail-unread-outline' : 'mail-open-outline'}
@@ -239,77 +208,70 @@ function TaskRowInner({
     </View>
   );
 
-  const overdue = isOverdue(task.dueDate) && !completed;
-  const showPin = task.priority === 'important' || task.priority === 'must_do_today';
-  const contentTapGesture = useMemo(() => {
-    const doubleTap = Gesture.Tap()
-      .numberOfTaps(2)
-      .maxDelay(260)
-      .maxDuration(220)
-      .maxDistance(14)
-      .runOnJS(true)
-      .onBegin(pressIn)
-      .onEnd(() => {
-        onComplete();
-      })
-      .onFinalize(handlePressOut);
-
-    const singleTap = Gesture.Tap()
-      .enabled(!reorderMode)
-      .numberOfTaps(1)
-      .maxDuration(220)
-      .maxDistance(14)
-      .runOnJS(true)
-      .onBegin(pressIn)
-      .onEnd(openTask)
-      .onFinalize(handlePressOut);
-
-    return Gesture.Exclusive(doubleTap, singleTap);
-  }, [handlePressOut, onComplete, openTask, pressIn, reorderMode]);
-
-  const reorderGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!completed)
-        .activateAfterLongPress(reorderMode ? 0 : 420)
-        .minDistance(3)
-        .activeOffsetY([-3, 3])
-        .failOffsetX([-18, 18])
-        .runOnJS(true)
-        .onStart(() => {
-          beginDrag();
-          void triggerMediumHaptic();
-        })
-        .onUpdate((event) => {
-          beginDrag();
-          if (dragTranslationY) {
-            dragTranslationY.value = event.translationY;
-          }
-          dragDistance.current = event.translationY;
-          onDragMoveRef.current?.(event.translationY);
-        })
-        .onFinalize(() => {
-          resetDrag(dragDistance.current);
-        }),
-    [
-      beginDrag,
-      completed,
-      dragTranslationY,
-      reorderMode,
-      resetDrag,
-    ]
+  const content = (
+    <Pressable
+      onPress={handleContentPress}
+      onLongPress={dragEnabled ? onDragActivate : undefined}
+      delayLongPress={200}
+      disabled={isDragging}
+      style={styles.content}
+      accessibilityRole="button"
+      accessibilityLabel={`Task: ${task.title}`}
+    >
+      {colorMark ? (
+        <View style={[styles.colorMark, { backgroundColor: colorMark }]} />
+      ) : null}
+      <Animated.Text
+        style={[
+          completed ? typography.taskTitleCompleted : typography.taskTitle,
+          { color: completed ? tokens.mutedText : tokens.text },
+          titleStyle,
+          completed && styles.strikethrough,
+        ]}
+        numberOfLines={3}
+      >
+        {task.title}
+      </Animated.Text>
+      {task.notes && !completed ? (
+        <Text
+          style={[typography.meta, styles.notePreview, { color: tokens.mutedText }]}
+          numberOfLines={1}
+        >
+          {task.notes}
+        </Text>
+      ) : null}
+      {(task.reminderAt || listName || isRecurring(task.recurrence)) && !completed && (
+        <View style={styles.meta}>
+          {task.reminderAt ? (
+            <Text style={[typography.meta, { color: tokens.mutedText }]}>
+              {formatTime(task.reminderAt)}
+            </Text>
+          ) : null}
+          {isRecurring(task.recurrence) ? (
+            <Text style={[typography.meta, { color: tokens.accent }]}>
+              ↻ {formatRecurrenceLabel(task.recurrence)}
+            </Text>
+          ) : null}
+          {listName ? (
+            <Text style={[typography.meta, { color: tokens.mutedText }]}>
+              {listName}
+            </Text>
+          ) : null}
+        </View>
+      )}
+      {completed && task.reminderAt ? (
+        <Text style={[typography.meta, { color: tokens.mutedText }]}>
+          {formatTime(task.reminderAt)}
+        </Text>
+      ) : null}
+    </Pressable>
   );
 
-  const row = (
+  const rowBody = (
     <Animated.View
-      layout={
-        disableLayoutAnimation
-          ? undefined
-          : LinearTransition.springify().damping(18).stiffness(220)
-      }
       style={[
         styles.row,
-        holdStyle,
+        !isDragging && holdStyle,
         {
           backgroundColor: isMust ? tokens.card : tokens.background,
           borderColor: tokens.paperLine,
@@ -317,9 +279,21 @@ function TaskRowInner({
         isMust && styles.mustRow,
       ]}
     >
-      {isMust && (
+      {isMust ? (
         <View style={[styles.mustBar, { backgroundColor: tokens.accent }]} />
-      )}
+      ) : null}
+      <View style={styles.dateColumn}>
+        <Text
+          style={[
+            typography.meta,
+            styles.sideDate,
+            { color: tokens.mutedText },
+          ]}
+          numberOfLines={1}
+        >
+          {sideDate || ' '}
+        </Text>
+      </View>
       <View style={styles.pinColumn}>
         <View style={[styles.verticalRule, { backgroundColor: tokens.paperLine }]} />
         {completed ? (
@@ -333,101 +307,31 @@ function TaskRowInner({
             accessibilityRole="button"
             accessibilityLabel="Unpin task"
           >
-            <Ionicons name="pin" size={15} color={tokens.actionPin} />
+            <Ionicons name="pin" size={14} color={tokens.actionPin} />
           </Pressable>
         ) : null}
       </View>
-      <GestureDetector gesture={contentTapGesture}>
-        <Animated.View style={styles.content}>
-          {colorMark ? (
-            <View style={[styles.colorMark, { backgroundColor: colorMark }]} />
-          ) : null}
-          <Animated.Text
-            style={[
-              completed ? typography.taskTitleCompleted : typography.taskTitle,
-              { color: tokens.text },
-              titleStyle,
-              completed && styles.strikethrough,
-            ]}
-            numberOfLines={3}
-          >
-            {task.title}
-          </Animated.Text>
-          {task.notes && !completed ? (
-            <Text
-              style={[typography.meta, styles.notePreview, { color: tokens.mutedText }]}
-              numberOfLines={1}
-            >
-              {task.notes}
-            </Text>
-          ) : null}
-          {(task.dueDate || listName || isRecurring(task.recurrence)) &&
-            !completed && (
-            <View style={styles.meta}>
-              {task.dueDate && (
-                <Text
-                  style={[
-                    typography.meta,
-                    { color: overdue ? tokens.danger : tokens.mutedText },
-                  ]}
-                >
-                  {formatDisplayDate(task.dueDate)}
-                  {task.reminderAt ? ` · ${formatTime(task.reminderAt)}` : ''}
-                </Text>
-              )}
-              {isRecurring(task.recurrence) && (
-                <Text style={[typography.meta, { color: tokens.accent }]}>
-                  ↻ {formatRecurrenceLabel(task.recurrence)}
-                </Text>
-              )}
-              {listName && (
-                <Text style={[typography.meta, { color: tokens.mutedText }]}>
-                  {listName}
-                </Text>
-              )}
-            </View>
-          )}
-        </Animated.View>
-      </GestureDetector>
-      {reorderMode && !completed ? (
-        <View
-          style={[styles.dragHandle, { opacity: canMoveUp || canMoveDown ? 1 : 0.35 }]}
-          accessibilityRole="adjustable"
-          accessibilityLabel="Drag to reorder task"
-        >
-          <Ionicons name="reorder-three-outline" size={19} color={tokens.mutedText} />
-        </View>
-      ) : null}
+      {content}
     </Animated.View>
   );
 
   return (
     <Animated.View
-      renderToHardwareTextureAndroid
-      shouldRasterizeIOS
       onLayout={handleLayout}
-      style={[
-        styles.outer,
-        compact && styles.outerCompact,
-        dragStyle,
-      ]}
+      style={[styles.outer, compact && styles.outerCompact]}
     >
-      {reorderMode && !completed ? (
-        <GestureDetector gesture={reorderGesture}>{row}</GestureDetector>
-      ) : (
-        <GestureDetector gesture={reorderGesture}>
-          <Swipeable
-            renderLeftActions={renderLeft}
-            renderRightActions={renderRight}
-            friction={2}
-            overshootFriction={8}
-            activeOffsetX={[-16, 16]}
-            failOffsetY={[-12, 12]}
-          >
-            {row}
-          </Swipeable>
-        </GestureDetector>
-      )}
+      <Swipeable
+        ref={swipeRef}
+        enabled={swipeEnabled && !isDragging}
+        renderLeftActions={renderLeft}
+        renderRightActions={renderRight}
+        friction={2}
+        overshootFriction={8}
+        activeOffsetX={SWIPE_ACTIVE_OFFSET_X}
+        failOffsetY={SWIPE_FAIL_OFFSET_Y}
+      >
+        {rowBody}
+      </Swipeable>
     </Animated.View>
   );
 }
@@ -437,7 +341,6 @@ export const TaskRow = React.memo(TaskRowInner);
 const styles = StyleSheet.create({
   outer: {
     marginBottom: 0,
-    overflow: 'visible',
     position: 'relative',
   },
   outerCompact: { marginBottom: 0 },
@@ -447,7 +350,7 @@ const styles = StyleSheet.create({
     minHeight: 45,
     paddingVertical: 7,
     paddingHorizontal: spacing.lg,
-    gap: 10,
+    gap: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   mustRow: {
@@ -466,8 +369,20 @@ const styles = StyleSheet.create({
     width: 3,
     borderRadius: 2,
   },
+  dateColumn: {
+    width: 34,
+    minHeight: 28,
+    paddingTop: 2,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+  },
+  sideDate: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontVariant: ['tabular-nums'],
+  },
   pinColumn: {
-    width: 38,
+    width: 28,
     minHeight: 28,
     paddingTop: 1,
     alignItems: 'center',
@@ -489,12 +404,12 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   pinButton: {
-    minWidth: 28,
-    minHeight: 28,
+    minWidth: 24,
+    minHeight: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  content: { flex: 1, justifyContent: 'center', minHeight: 28, paddingLeft: 10 },
+  content: { flex: 1, justifyContent: 'center', minHeight: 28, paddingLeft: 8 },
   colorMark: {
     position: 'absolute',
     left: 0,
@@ -524,11 +439,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 42,
     marginRight: StyleSheet.hairlineWidth,
-  },
-  dragHandle: {
-    width: 28,
-    minHeight: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

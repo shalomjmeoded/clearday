@@ -4,10 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { PRO_PRIVACY_NOTE } from '@/constants/privacyCopy';
-import {
-  PRO_COMING_SOON_FEATURES,
-  PRO_INCLUDED_FEATURES,
-} from '@/features/pro/proFeatures';
+import { PRO_INCLUDED_FEATURES } from '@/features/pro/proFeatures';
 import { subscriptionService } from '@/features/pro/subscriptionService';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -67,11 +64,11 @@ export default function ProScreen() {
           ) : null}
 
           <Text style={[typography.heroTitle, styles.title, { color: tokens.text }]}>
-            Make it yours.
+            Make Do! yours.
           </Text>
           <Text style={[typography.body, styles.subtitle, { color: tokens.mutedText }]}>
-            Go Pro to remove ads, create unlimited lists, and pick any due date. More
-            features below are planned and not available yet.
+            Unlock unlimited lists, recurring tasks, advanced reminders, widgets, premium
+            themes, backup/export, sync, shared lists, voice capture, and insights.
           </Text>
 
           <View style={styles.plans}>
@@ -125,28 +122,11 @@ export default function ProScreen() {
             </Text>
           </Pressable>
 
-          <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
-            INCLUDED NOW
-          </Text>
           <View style={[styles.featureList, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
             {PRO_INCLUDED_FEATURES.map((feature) => (
               <Text
                 key={feature}
                 style={[typography.body, styles.featureItem, { color: tokens.text }]}
-              >
-                · {feature}
-              </Text>
-            ))}
-          </View>
-
-          <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
-            COMING SOON
-          </Text>
-          <View style={[styles.featureList, styles.featureListMuted, { backgroundColor: tokens.sectionBg, borderColor: tokens.border }]}>
-            {PRO_COMING_SOON_FEATURES.map((feature) => (
-              <Text
-                key={feature}
-                style={[typography.body, styles.featureItem, { color: tokens.mutedText }]}
               >
                 · {feature}
               </Text>
@@ -223,18 +203,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: spacing.xl,
   },
-  sectionLabel: {
-    marginBottom: spacing.sm,
-    letterSpacing: 0.5,
-  },
   featureList: {
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     padding: spacing.md,
     gap: spacing.xs,
-    marginBottom: spacing.lg,
-  },
-  featureListMuted: {
     marginBottom: spacing.xl,
   },
   featureItem: { lineHeight: 22 },

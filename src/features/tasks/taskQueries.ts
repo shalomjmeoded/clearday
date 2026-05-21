@@ -34,14 +34,33 @@ export async function fetchTodayTasks(): Promise<Task[]> {
   return sortTodayTasks(tasks.filter(matchesTodayActive));
 }
 
+function matchesTodayCompleted(task: Task): boolean {
+  if (task.status !== 'completed' || !task.completedAt) return false;
+  if (!isToday(task.completedAt)) return false;
+  if (task.dueDate && isTomorrow(task.dueDate)) return false;
+  return true;
+}
+
+function matchesTomorrowCompleted(task: Task): boolean {
+  if (task.status !== 'completed' || !task.completedAt || !task.dueDate) return false;
+  if (!isTomorrow(task.dueDate)) return false;
+  return isToday(task.completedAt) || isTomorrow(task.completedAt);
+}
+
 export async function fetchTodayCompletedTasks(): Promise<Task[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM tasks WHERE status = 'completed' AND deletedAt IS NULL ORDER BY completedAt DESC`
   );
-  return rows
-    .map(mapRowToTask)
-    .filter((t) => t.completedAt && isToday(t.completedAt));
+  return rows.map(mapRowToTask).filter(matchesTodayCompleted);
+}
+
+export async function fetchTomorrowCompletedTasks(): Promise<Task[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM tasks WHERE status = 'completed' AND deletedAt IS NULL AND dueDate IS NOT NULL ORDER BY completedAt DESC`
+  );
+  return rows.map(mapRowToTask).filter(matchesTomorrowCompleted);
 }
 
 export async function fetchTomorrowTasks(): Promise<Task[]> {
@@ -75,5 +94,13 @@ export async function fetchDoneTasks(): Promise<Task[]> {
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM tasks WHERE status = 'completed' AND deletedAt IS NULL ORDER BY completedAt DESC`
   );
-  return rows.map(mapRowToTask);
+  const all = rows.map(mapRowToTask);
+  const [todayInline, tomorrowInline] = await Promise.all([
+    fetchTodayCompletedTasks(),
+    fetchTomorrowCompletedTasks(),
+  ]);
+  const inlineIds = new Set(
+    [...todayInline, ...tomorrowInline].map((task) => task.id)
+  );
+  return all.filter((task) => !inlineIds.has(task.id));
 }

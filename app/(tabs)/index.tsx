@@ -6,15 +6,16 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { TaskList } from '@/components/tasks/TaskList';
-import { TODAY_FILTER_ALL } from '@/components/today/TodayListFilter';
 import { INBOX_LIST_ID } from '@/db/constants';
+import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useListStore } from '@/store/listStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
-import { isOverdue } from '@/utils/dates';
+import type { QuickAddOptions } from '@/types/quickAdd';
+import { isOverdue, isToday, formatHeaderDate } from '@/utils/dates';
 import {
   triggerLightHaptic,
   triggerMediumHaptic,
@@ -39,11 +40,8 @@ const SORT_OPTIONS: { key: TaskSortMode; label: string }[] = [
   { key: 'color', label: 'Color Tag' },
 ];
 
-function filterTasksByList(tasks: Task[], listFilter: string): Task[] {
-  if (listFilter === TODAY_FILTER_ALL) return tasks;
-  return tasks.filter(
-    (t) => (t.listId ?? INBOX_LIST_ID) === listFilter
-  );
+function filterTasksByList(tasks: Task[], listId: string): Task[] {
+  return tasks.filter((task) => (task.listId ?? INBOX_LIST_ID) === listId);
 }
 
 export default function TodayScreen() {
@@ -54,6 +52,7 @@ export default function TodayScreen() {
   const todayTasks = useTaskStore((s) => s.todayTasks);
   const todayCompletedTasks = useTaskStore((s) => s.todayCompletedTasks);
   const tomorrowTasks = useTaskStore((s) => s.tomorrowTasks);
+  const tomorrowCompletedTasks = useTaskStore((s) => s.tomorrowCompletedTasks);
   const laterTasks = useTaskStore((s) => s.laterTasks);
   const todayReady = useTaskStore((s) => s.todayReady);
   const refreshAll = useTaskStore((s) => s.refreshAll);
@@ -67,9 +66,7 @@ export default function TodayScreen() {
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
   const reorderTasks = useTaskStore((s) => s.reorderTasks);
-  const [listFilter] = useState(TODAY_FILTER_ALL);
   const [statusFilter, setStatusFilter] = useState<'all' | 'overdue' | 'today' | 'tomorrow'>('all');
-  const [reorderMode, setReorderMode] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [adding, setAdding] = useState(false);
@@ -83,11 +80,15 @@ export default function TodayScreen() {
     }, [refreshAll, refreshLists])
   );
 
+  const reorderMode = sortMode === 'manual';
+
   const allActiveTasks = useMemo(() => {
     const map = new Map<string, Task>();
-    [...todayTasks, ...tomorrowTasks, ...laterTasks].forEach((task) => {
-      map.set(task.id, task);
-    });
+    [...todayTasks, ...tomorrowTasks, ...laterTasks]
+      .filter((task) => task.status === 'active')
+      .forEach((task) => {
+        map.set(task.id, task);
+      });
     return [...map.values()].sort((a, b) => a.sortOrder - b.sortOrder);
   }, [todayTasks, tomorrowTasks, laterTasks]);
 
@@ -101,16 +102,32 @@ export default function TodayScreen() {
     [lists]
   );
 
+  const listNames = useMemo(
+    () => Object.fromEntries(lists.map((list) => [list.id, list.name])),
+    [lists]
+  );
+
+  const listScopedActive = useMemo(
+    () => filterTasksByList(allActiveTasks, defaultListId),
+    [allActiveTasks, defaultListId]
+  );
+
   const filteredActive = useMemo(() => {
     let nextTasks: Task[];
     if (statusFilter === 'overdue') {
-      nextTasks = allActiveTasks.filter((task) => task.dueDate && isOverdue(task.dueDate));
+      nextTasks = listScopedActive.filter(
+        (task) => task.dueDate && isOverdue(task.dueDate)
+      );
     } else if (statusFilter === 'tomorrow') {
-      nextTasks = filterTasksByList(tomorrowTasks, listFilter);
+      nextTasks = filterTasksByList(tomorrowTasks, defaultListId).filter(
+        (task) => task.status === 'active'
+      );
     } else if (statusFilter === 'today') {
-      nextTasks = filterTasksByList(todayTasks, listFilter);
+      nextTasks = filterTasksByList(todayTasks, defaultListId).filter(
+        (task) => task.status === 'active'
+      );
     } else {
-      nextTasks = filterTasksByList(allActiveTasks, listFilter);
+      nextTasks = filterTasksByList(allActiveTasks, defaultListId);
     }
     const query = searchQuery.trim().toLowerCase();
     if (query) {
@@ -149,37 +166,67 @@ export default function TodayScreen() {
     }
     return nextTasks;
   }, [
-    allActiveTasks,
+    listScopedActive,
     listColors,
-    listFilter,
+    defaultListId,
     searchQuery,
     sortMode,
     statusFilter,
     todayTasks,
     tomorrowTasks,
   ]);
-  const filteredCompleted = useMemo(
-    () =>
-      statusFilter === 'all' || statusFilter === 'today'
-        ? filterTasksByList(todayCompletedTasks, listFilter)
-        : [],
-    [todayCompletedTasks, listFilter, statusFilter]
-  );
-  const totalVisible = filteredActive.length + filteredCompleted.length;
-  const overdueCount = allActiveTasks.filter(
+
+  const filteredCompleted = useMemo(() => {
+    let completed: Task[];
+    if (statusFilter === 'tomorrow') {
+      completed = filterTasksByList(tomorrowCompletedTasks, defaultListId);
+    } else if (statusFilter === 'today') {
+      completed = filterTasksByList(
+        todayCompletedTasks.filter(
+          (task) =>
+            !task.dueDate ||
+            (task.dueDate && (isToday(task.dueDate) || isOverdue(task.dueDate)))
+        ),
+        defaultListId
+      );
+    } else if (statusFilter === 'overdue') {
+      completed = [];
+    } else {
+      completed = filterTasksByList(todayCompletedTasks, defaultListId);
+    }
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      completed = completed.filter(
+        (task) =>
+          task.title.toLowerCase().includes(query) ||
+          (task.notes ?? '').toLowerCase().includes(query)
+      );
+    }
+    return completed;
+  }, [
+    defaultListId,
+    searchQuery,
+    statusFilter,
+    todayCompletedTasks,
+    tomorrowCompletedTasks,
+  ]);
+
+  const overdueCount = listScopedActive.filter(
     (task) => task.dueDate && isOverdue(task.dueDate)
   ).length;
+  const todayCount = filterTasksByList(todayTasks, defaultListId).filter(
+    (task) => task.status === 'active'
+  ).length;
+  const tomorrowCount = filterTasksByList(tomorrowTasks, defaultListId).filter(
+    (task) => task.status === 'active'
+  ).length;
   const statusTabs = [
-    { key: 'all' as const, label: 'All', count: allActiveTasks.length },
+    { key: 'all' as const, label: 'All', count: listScopedActive.length },
     { key: 'overdue' as const, label: 'Overdue', count: overdueCount },
-    { key: 'today' as const, label: 'Today', count: todayTasks.length },
-    { key: 'tomorrow' as const, label: 'Tomorrow', count: tomorrowTasks.length },
+    { key: 'today' as const, label: 'Today', count: todayCount },
+    { key: 'tomorrow' as const, label: 'Tomorrow', count: tomorrowCount },
   ];
 
-  const addTargetListId =
-    listFilter === TODAY_FILTER_ALL ? defaultListId : listFilter;
-  const addTargetListName =
-    lists.find((l) => l.id === addTargetListId)?.name ?? 'Inbox';
   useEffect(() => {
     if (!adding) return;
     const timer = setTimeout(() => addInputRef.current?.focus(), 60);
@@ -187,13 +234,13 @@ export default function TodayScreen() {
   }, [adding]);
 
   const handleComplete = async (id: string) => {
-    if (todayCompletedTasks.some((t) => t.id === id)) {
-      await triggerLightHaptic();
-      await uncompleteTask(id);
-      return;
-    }
     await triggerSuccessHaptic();
     await completeTask(id);
+  };
+
+  const handleUncomplete = async (id: string) => {
+    await triggerLightHaptic();
+    await uncompleteTask(id);
   };
 
   const handleArchive = async (id: string) => {
@@ -215,8 +262,8 @@ export default function TodayScreen() {
     ]);
   };
 
-  const handleAdd = async (text: string) => {
-    const created = await addTask(text, addTargetListId);
+  const handleAdd = async (text: string, options?: QuickAddOptions) => {
+    const created = await addTask(text, defaultListId, options);
     if (!created) {
       Alert.alert('Could not add task', 'Please try again.');
       return;
@@ -252,12 +299,41 @@ export default function TodayScreen() {
 
   const header = (
     <View>
-      <View style={styles.header}>
+      <View style={[styles.header, styles.headerTop]}>
         <View style={styles.headerText}>
           <Text style={[typography.heroTitle, { color: tokens.text }]}>
-            Do!
+            Today
+          </Text>
+          <Text
+            style={[
+              typography.caption,
+              styles.date,
+              { color: tokens.mutedText },
+            ]}
+          >
+            {formatHeaderDate()}
+            {' · '}
+            {lists.find((list) => list.id === defaultListId)?.name ?? 'Inbox'}
           </Text>
         </View>
+        <Pressable
+          onPress={openFocus}
+          style={({ pressed }) => [
+            styles.focusBtn,
+            {
+              backgroundColor: tokens.accentSoft,
+              borderColor: tokens.border,
+              minHeight: MIN_TOUCH_TARGET,
+            },
+            pressed && styles.focusPressed,
+          ]}
+        >
+          <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
+            Focus
+          </Text>
+        </Pressable>
+      </View>
+      <View style={styles.header}>
         <Pressable
           onPress={toggleOrder}
           style={({ pressed }) => [
@@ -327,7 +403,6 @@ export default function TodayScreen() {
                 onPress={async () => {
                   await triggerLightHaptic();
                   setSortMode(option.key);
-                  setReorderMode(false);
                   setSortMenuOpen(false);
                 }}
                 style={({ pressed }) => [styles.sortOption, pressed && { opacity: 0.72 }]}
@@ -380,14 +455,18 @@ export default function TodayScreen() {
       header={header}
       inputRef={addInputRef}
       showInputBar={adding}
+      keepEditing={adding}
+      dismissKeyboardOnBackdropPress={!adding}
     >
       <View style={styles.list}>
         <TaskList
+          key={defaultListId}
           activeTasks={filteredActive}
           completedTasks={filteredCompleted}
+          inlineCompleted
           loading={!todayReady}
+          listNames={listNames}
           listColors={listColors}
-          hideAdWhenKeyboardOpen
           emptyMessage={
             statusFilter === 'all'
               ? 'No tasks here.'
@@ -395,29 +474,21 @@ export default function TodayScreen() {
           }
           emptySubtitle="Tap below when something comes to mind."
           onComplete={handleComplete}
+          onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}
           onArchive={handleArchive}
           onMoveTomorrow={moveToTomorrow}
           onDelete={handleDelete}
           onSetImportant={setImportant}
           onToggleRecurring={toggleRecurring}
-          onStartManualSort={() => {
-            setSortMode('manual');
-          }}
-          onEndManualSort={() => setReorderMode(false)}
-          onReorder={(orderedIds) =>
-            reorderTasks(
-              orderedIds,
-              listFilter === TODAY_FILTER_ALL ? undefined : listFilter
-            )
-          }
+          onReorder={(orderedIds) => reorderTasks(orderedIds, defaultListId)}
           reorderMode={reorderMode}
         />
         <Pressable
           onPress={() => setAdding(true)}
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: '#4F8EEB' },
+            { backgroundColor: tokens.accent },
             pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
           ]}
         >
@@ -434,9 +505,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
+  },
+  headerTop: {
+    alignItems: 'flex-start',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
   },
   headerText: { flexShrink: 0 },
   headerActions: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
@@ -515,7 +590,7 @@ const styles = StyleSheet.create({
   focusBtn: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
-    width: 44,
+    paddingHorizontal: spacing.md,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: spacing.xs,

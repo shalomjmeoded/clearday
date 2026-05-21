@@ -1,20 +1,19 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { FormScreen } from '@/components/layout/FormScreen';
 import { ReminderTimePicker } from '@/components/reminders/ReminderTimePicker';
 import {
+  runExportWithFeedback,
+  runImportWithFeedback,
+} from '@/features/backup/backupService';
+import {
   SettingsChips,
   SettingsGroup,
   SettingsRow,
 } from '@/components/ui/SettingsGroup';
-import {
-  runExportWithFeedback,
-  runImportWithFeedback,
-  showDeviceTransferHelp,
-} from '@/features/backup/backupService';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useListStore } from '@/store/listStore';
@@ -70,7 +69,6 @@ export default function SettingsScreen() {
   const refreshAll = useTaskStore((s) => s.refreshAll);
   const refreshLists = useListStore((s) => s.refresh);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
-  const [backupBusy, setBackupBusy] = useState(false);
   const defaultTime = parseTimeKey(settings.defaultReminderTime);
   const [pickerHours, setPickerHours] = useState(defaultTime.hours);
   const [pickerMinutes, setPickerMinutes] = useState(defaultTime.minutes);
@@ -83,43 +81,12 @@ export default function SettingsScreen() {
     await setSetting(key, value);
   };
 
-  const afterBackupRestore = async () => {
-    setBackupBusy(true);
-    try {
+  const handleImport = () => {
+    void runImportWithFeedback(async () => {
       await hydrateSettings();
       await refreshAll();
       await refreshLists();
-    } finally {
-      setBackupBusy(false);
-    }
-  };
-
-  const handleExport = async () => {
-    if (backupBusy) return;
-    await triggerSelectionHaptic();
-    setBackupBusy(true);
-    try {
-      await runExportWithFeedback();
-    } finally {
-      setBackupBusy(false);
-    }
-  };
-
-  const handleImport = async () => {
-    if (backupBusy) return;
-    await triggerSelectionHaptic();
-    setBackupBusy(true);
-    try {
-      await runImportWithFeedback(afterBackupRestore);
-    } finally {
-      setBackupBusy(false);
-    }
-  };
-
-  const handleSync = async () => {
-    if (backupBusy) return;
-    await triggerSelectionHaptic();
-    showDeviceTransferHelp(handleExport, handleImport);
+    });
   };
 
   return (
@@ -134,15 +101,6 @@ export default function SettingsScreen() {
         }}
       />
       <FormScreen modalHeader>
-        {backupBusy ? (
-          <View style={styles.busyRow}>
-            <ActivityIndicator color={tokens.accent} size="small" />
-            <Text style={[typography.meta, { color: tokens.mutedText }]}>
-              Working on backup…
-            </Text>
-          </View>
-        ) : null}
-
         <SettingsGroup title="Appearance">
           <SettingsChips
             options={THEME_OPTIONS}
@@ -168,11 +126,37 @@ export default function SettingsScreen() {
           />
         </SettingsGroup>
 
-        <SettingsGroup title="Completed tasks">
+        <SettingsGroup title="Pro">
+          <SettingsRow
+            label={isPro ? 'Do! Pro' : 'Upgrade to Pro'}
+            value={isPro ? 'Active' : undefined}
+            onPress={() => router.push('/pro')}
+          />
+          <SettingsRow
+            label="Recurring Task"
+            value={isPro ? 'Included' : 'Pro'}
+            valueMuted={!isPro}
+            onPress={() => router.push('/recurring')}
+            last
+          />
+        </SettingsGroup>
+
+        <SettingsGroup title="Tasks">
           <SettingsChips
             options={BEHAVIOR_OPTIONS}
             value={settings.completedTaskBehavior}
             onChange={(b) => update('completedTaskBehavior', b)}
+          />
+          <Text style={[typography.meta, styles.hint, { color: tokens.mutedText }]}>
+            How completed tasks appear on Today (history is in More → Finished Tasks)
+          </Text>
+        </SettingsGroup>
+
+        <SettingsGroup title="Lists">
+          <SettingsRow
+            label="Manage Lists"
+            onPress={() => router.push('/lists')}
+            last
           />
         </SettingsGroup>
 
@@ -212,20 +196,17 @@ export default function SettingsScreen() {
           </Text>
           <SettingsRow
             label="Export Backup"
-            onPress={handleExport}
-            disabled={backupBusy}
+            onPress={() => void runExportWithFeedback()}
           />
           <SettingsRow
             label="Import Backup"
             onPress={handleImport}
-            disabled={backupBusy}
           />
           <SettingsRow
-            label="Sync between devices"
-            value="Manual"
+            label="Cloud Sync"
+            value="Coming later"
             valueMuted
-            onPress={handleSync}
-            disabled={backupBusy}
+            disabled
             last
           />
         </SettingsGroup>
@@ -243,11 +224,16 @@ export default function SettingsScreen() {
           </Text>
         </SettingsGroup>
 
-        <SettingsGroup title="Account" style={styles.accountGroup}>
+        <SettingsGroup title="Support" style={styles.accountGroup}>
           <SettingsRow
-            label="ClearDay Pro"
-            value={isPro ? 'Active' : undefined}
-            onPress={() => router.push('/pro')}
+            label="Help"
+            onPress={() => router.push('/help')}
+          />
+          <SettingsRow
+            label="Write a Review"
+            value="Coming soon"
+            valueMuted
+            disabled
             last
           />
         </SettingsGroup>
@@ -257,13 +243,6 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  busyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-    paddingHorizontal: spacing.xs,
-  },
   hint: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,

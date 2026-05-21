@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { AdSlot } from '@/components/ads/AdSlot';
 import { ListCreateForm } from '@/components/lists/ListCreateForm';
 import { ListRow } from '@/components/lists/ListRow';
 import {
@@ -53,7 +52,7 @@ export default function ListsScreen() {
 
   const promptUpgrade = () => {
     Alert.alert(
-      'ClearDay Pro',
+      'Do! Pro',
       'Free includes one custom list. Upgrade for unlimited lists.',
       [
         { text: 'Not now', style: 'cancel' },
@@ -104,11 +103,8 @@ export default function ListsScreen() {
             isTodayDefault={isTodayDefault}
             onPress={async () => {
               await triggerSelectionHaptic();
-              router.push(`/lists/${item.id}`);
-            }}
-            onSetToday={async () => {
-              await triggerSelectionHaptic();
               await setSetting('defaultListId', item.id);
+              router.push('/(tabs)/');
             }}
             onLongPress={() => openListEdit(item.id)}
           />
@@ -138,8 +134,6 @@ export default function ListsScreen() {
           </Text>
         </Pressable>
       ) : null}
-
-      <AdSlot placement="lists_bottom" inset={false} />
     </ScrollScreen>
   );
 }
