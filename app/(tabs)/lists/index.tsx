@@ -103,11 +103,8 @@ export default function ListsScreen() {
             isTodayDefault={isTodayDefault}
             onPress={async () => {
               await triggerSelectionHaptic();
-              router.push(`/lists/${item.id}`);
-            }}
-            onSetToday={async () => {
-              await triggerSelectionHaptic();
               await setSetting('defaultListId', item.id);
+              router.push('/(tabs)/');
             }}
             onLongPress={() => openListEdit(item.id)}
           />

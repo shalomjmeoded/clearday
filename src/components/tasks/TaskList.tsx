@@ -10,7 +10,6 @@ import { spacing } from '@/theme/spacing';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
-import { debugLog } from '@/utils/debugLog';
 import { mergeTasksPreservingOrder } from '@/utils/taskSyncKey';
 
 import { CompletedSection } from './CompletedSection';
@@ -98,12 +97,6 @@ export function TaskList({
   const onSetImportantRef = useRef(onSetImportant);
   const onToggleRecurringRef = useRef(onToggleRecurring);
   const onReorderRef = useRef(onReorder);
-  const latestDropIdsRef = useRef<string | null>(null);
-  const dragLifecycleRef = useRef({
-    beginAt: 0,
-    releaseAt: 0,
-    placeholderChanges: 0,
-  });
 
   onCompleteRef.current = onComplete;
   onUncompleteRef.current = onUncomplete;
@@ -123,12 +116,20 @@ export function TaskList({
 
   useEffect(() => {
     if (reorderMode) {
-      if (orderedTasks.length === 0 && activeTasks.length > 0) {
-        setOrderedTasks(activeTasks);
-      }
-      if (manualSortTasks.length === 0 && draggableTasks.length > 0) {
-        setManualSortTasks(draggableTasks);
-      }
+      setOrderedTasks((current) => {
+        const merged = mergeTasksPreservingOrder(current, activeTasks);
+        if (taskIds(current) === taskIds(merged)) {
+          return current;
+        }
+        return merged;
+      });
+      setManualSortTasks((current) => {
+        const merged = mergeTasksPreservingOrder(current, activeTasks);
+        if (taskIds(current) === taskIds(merged)) {
+          return current;
+        }
+        return merged;
+      });
       return;
     }
     setOrderedTasks((current) => {
@@ -150,63 +151,11 @@ export function TaskList({
     }
     if (!reorderMode && wasReorderMode) {
       if (manualSortTasks.length > 0 && onReorderRef.current) {
-        const orderedIds = manualSortTasks.map((task) => task.id);
-        // #region agent log
-        debugLog(
-          'TaskList.tsx:useEffect(reorderMode)',
-          'persist reorder when exiting manual mode',
-          { count: orderedIds.length, topIds: orderedIds.slice(0, 5) },
-          'H28',
-          'probe-v11'
-        );
-        // #endregion agent log
-        onReorderRef.current(orderedIds);
+        onReorderRef.current(manualSortTasks.map((task) => task.id));
       }
     }
     prevReorderModeRef.current = reorderMode;
   }, [manualSortTasks, orderedTasks, reorderMode]);
-
-  useEffect(() => {
-    if (!reorderMode) return;
-    const activeIds = taskIds(activeTasks);
-    const orderedIds = taskIds(orderedTasks);
-    const manualIds = taskIds(manualSortTasks);
-    // #region agent log
-    debugLog(
-      'TaskList.tsx:useEffect(reorderSnapshot)',
-      'manual mode snapshot',
-      {
-        activeCount: activeTasks.length,
-        orderedCount: orderedTasks.length,
-        manualCount: manualSortTasks.length,
-        activeIds,
-        orderedIds,
-        manualIds,
-      },
-      'H27',
-      'probe-v11'
-    );
-    // #endregion agent log
-  }, [reorderMode, activeTasks, orderedTasks, manualSortTasks]);
-
-  useEffect(() => {
-    if (!reorderMode || !latestDropIdsRef.current) return;
-    const currentIds = taskIds(draggableTasks);
-    if (currentIds !== latestDropIdsRef.current) {
-      // #region agent log
-      debugLog(
-        'TaskList.tsx:useEffect(postDrop)',
-        'manual data diverged after drop',
-        {
-          expectedIds: latestDropIdsRef.current,
-          actualIds: currentIds,
-        },
-        'H28',
-        'probe-v11'
-      );
-      // #endregion agent log
-    }
-  }, [draggableTasks, reorderMode]);
 
   const hideCompleted = behavior === 'hide';
   const collapseCompleted = behavior === 'collapse';
@@ -214,6 +163,18 @@ export function TaskList({
   const showCompletedInline = inlineCompleted || behavior === 'show';
   const showCompletedSection =
     !inlineCompleted && collapseCompleted && !hideCompleted;
+
+  const activeTaskIds = useMemo(
+    () => new Set(activeTasks.map((task) => task.id)),
+    [activeTasks]
+  );
+
+  const visibleCompletedTasks = useMemo(
+    () => completedTasks.filter((task) => !activeTaskIds.has(task.id)),
+    [activeTaskIds, completedTasks]
+  );
+
+  const flatListData = reorderMode && onReorder ? draggableTasks : activeTasks;
 
   const resolveColorMark = useCallback(
     (item: Task) =>
@@ -301,14 +262,14 @@ export function TaskList({
     () => (
       <View>
         {showCompletedInline &&
-          completedTasks.map((task, index) => (
+          visibleCompletedTasks.map((task, index) => (
             <View key={task.id}>
-              {renderTaskRow(task, index < completedTasks.length - 1)}
+              {renderTaskRow(task, index < visibleCompletedTasks.length - 1)}
             </View>
           ))}
         {showCompletedSection && (
           <CompletedSection
-            tasks={completedTasks}
+            tasks={visibleCompletedTasks}
             onComplete={(id) => (onUncomplete ?? onComplete)(id)}
             onPress={onPress}
             onArchive={onArchive}
@@ -324,7 +285,7 @@ export function TaskList({
     [
       ListFooterExtra,
       showCompletedSection,
-      completedTasks,
+      visibleCompletedTasks,
       onArchive,
       onComplete,
       onDelete,
@@ -360,135 +321,21 @@ export function TaskList({
 
   const handleDragEnd = useCallback(
     ({ data, from, to }: { data: Task[]; from: number; to: number }) => {
-      const nextIds = data.map((task) => task.id);
-      debugLog(
-        'TaskList.tsx:handleDragEnd',
-        'drag end received',
-        {
-          from,
-          to,
-          count: nextIds.length,
-          topIds: nextIds.slice(0, 5),
-        },
-        'H3',
-        'arch-v1'
-      );
-
       if (from === to) {
-        debugLog(
-          'TaskList.tsx:handleDragEnd',
-          'skip drop update, same index',
-          { from, to },
-          'H3',
-          'arch-v1'
-        );
         return;
       }
-      latestDropIdsRef.current = nextIds.join(',');
-      // #region agent log
-      debugLog(
-        'TaskList.tsx:handleDragEnd',
-        'drag lifecycle completed',
-        {
-          from,
-          to,
-          placeholderChanges: dragLifecycleRef.current.placeholderChanges,
-          releaseToEndMs: dragLifecycleRef.current.releaseAt
-            ? Date.now() - dragLifecycleRef.current.releaseAt
-            : null,
-        },
-        'H30',
-        'probe-v12'
-      );
-      // #endregion agent log
 
+      const nextIds = data.map((task) => task.id);
       setManualSortTasks((prev) => {
         if (taskIds(prev) === nextIds.join(',')) {
           return prev;
         }
-        // #region agent log
-        debugLog(
-          'TaskList.tsx:handleDragEnd',
-          'apply draggable order to manual state',
-          {
-            previousTopIds: prev.slice(0, 5).map((task) => task.id),
-            nextTopIds: data.slice(0, 5).map((task) => task.id),
-          },
-          'H28',
-          'probe-v11'
-        );
-        // #endregion agent log
         return data;
       });
-      setDraggableListRevision((revision) => {
-        const nextRevision = revision + 1;
-        // #region agent log
-        debugLog(
-          'TaskList.tsx:handleDragEnd',
-          'remount draggable list after drop',
-          { previousRevision: revision, nextRevision },
-          'H31',
-          'probe-v12'
-        );
-        // #endregion agent log
-        return nextRevision;
-      });
+      setDraggableListRevision((revision) => revision + 1);
     },
     []
   );
-
-  const handleDragBegin = useCallback((index: number) => {
-    Keyboard.dismiss();
-    dragLifecycleRef.current = {
-      beginAt: Date.now(),
-      releaseAt: 0,
-      placeholderChanges: 0,
-    };
-    // #region agent log
-    debugLog(
-      'TaskList.tsx:handleDragBegin',
-      'drag begin',
-      { index, revision: draggableListRevision },
-      'H30',
-      'probe-v12'
-    );
-    // #endregion agent log
-  }, [draggableListRevision]);
-
-  const handleDragRelease = useCallback((index: number) => {
-    dragLifecycleRef.current.releaseAt = Date.now();
-    // #region agent log
-    debugLog(
-      'TaskList.tsx:handleDragRelease',
-      'drag release',
-      {
-        index,
-        placeholderChanges: dragLifecycleRef.current.placeholderChanges,
-        dragDurationMs: dragLifecycleRef.current.beginAt
-          ? Date.now() - dragLifecycleRef.current.beginAt
-          : null,
-      },
-      'H30',
-      'probe-v12'
-    );
-    // #endregion agent log
-  }, []);
-
-  const handlePlaceholderIndexChange = useCallback((index: number) => {
-    dragLifecycleRef.current.placeholderChanges += 1;
-    // #region agent log
-    debugLog(
-      'TaskList.tsx:handlePlaceholderIndexChange',
-      'placeholder moved',
-      {
-        index,
-        placeholderChanges: dragLifecycleRef.current.placeholderChanges,
-      },
-      'H30',
-      'probe-v12'
-    );
-    // #endregion agent log
-  }, []);
 
   const renderFlatItem = useCallback(
     ({ item }: { item: Task }) => renderTaskRow(item),
@@ -503,7 +350,7 @@ export function TaskList({
     );
   }
 
-  if (orderedTasks.length === 0 && completedTasks.length === 0) {
+  if (flatListData.length === 0 && visibleCompletedTasks.length === 0) {
     return <EmptyState message={emptyMessage} subtitle={emptySubtitle} />;
   }
 
@@ -527,9 +374,7 @@ export function TaskList({
             draggableListContentStyle,
             resolvedBottomInset > 0 && { paddingBottom: resolvedBottomInset },
           ]}
-          onDragBegin={handleDragBegin}
-          onRelease={handleDragRelease}
-          onPlaceholderIndexChange={handlePlaceholderIndexChange}
+          onDragBegin={() => Keyboard.dismiss()}
           onDragEnd={handleDragEnd}
           renderItem={renderDraggableItem}
           ListFooterComponent={completedFooter}
@@ -541,7 +386,7 @@ export function TaskList({
   return (
     <View style={[styles.wrap, { backgroundColor: tokens.background }]}>
       <FlatList
-        data={orderedTasks}
+        data={flatListData}
         keyExtractor={(item) => item.id}
         style={{ flex: 1, backgroundColor: tokens.background }}
         showsVerticalScrollIndicator={false}

@@ -11,7 +11,6 @@ interface Props {
   name: string;
   isTodayDefault: boolean;
   onPress: () => void;
-  onSetToday: () => void;
   onLongPress: () => void;
 }
 
@@ -19,7 +18,6 @@ export function ListRow({
   name,
   isTodayDefault,
   onPress,
-  onSetToday,
   onLongPress,
 }: Props) {
   const { tokens } = useTheme();
@@ -46,25 +44,17 @@ export function ListRow({
       >
         <Text style={[typography.body, { color: tokens.text }]}>{name}</Text>
       </Pressable>
-      <View style={styles.rowActions}>
-        {isTodayDefault ? (
-          <Text
-            style={[
-              typography.meta,
-              styles.actionLabel,
-              { color: tokens.accent },
-            ]}
-          >
-            Today
-          </Text>
-        ) : (
-          <Pressable onPress={onSetToday} hitSlop={8} style={styles.actionBtn}>
-            <Text style={[typography.meta, { color: tokens.mutedText }]}>
-              Set Today
-            </Text>
-          </Pressable>
-        )}
-      </View>
+      {isTodayDefault ? (
+        <Text
+          style={[
+            typography.meta,
+            styles.actionLabel,
+            { color: tokens.accent },
+          ]}
+        >
+          Today
+        </Text>
+      ) : null}
     </Animated.View>
   );
 }

@@ -18,7 +18,6 @@ import { INBOX_LIST_ID } from '@/db/constants';
 import { listRepository } from '@/features/lists/listRepository';
 import { useSettingsStore } from '@/store/settingsStore';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
-import { debugLog } from '@/utils/debugLog';
 import { isRecurring } from '@/utils/recurrence';
 
 function patchTaskInState(
@@ -215,11 +214,16 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     if (!existing) return;
 
     if (!isRecurring(existing.recurrence)) {
+      const completedAt = new Date().toISOString();
       set((state) => ({
         todayTasks: state.todayTasks.filter((task) => task.id !== id),
         tomorrowTasks: state.tomorrowTasks.filter((task) => task.id !== id),
         laterTasks: state.laterTasks.filter((task) => task.id !== id),
         listTasks: state.listTasks.filter((task) => task.id !== id),
+        todayCompletedTasks: [
+          { ...existing, status: 'completed', completedAt },
+          ...state.todayCompletedTasks.filter((task) => task.id !== id),
+        ],
       }));
     }
 
@@ -303,26 +307,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   reorderTasks: async (orderedIds, listId) => {
     try {
-      debugLog(
-        'taskStore.ts:reorderTasks',
-        'reorder persistence start',
-        { listId: listId ?? null, count: orderedIds.length, topIds: orderedIds.slice(0, 5) },
-        'H4'
-      );
       await taskRepository.reorderTasks(orderedIds);
-      debugLog(
-        'taskStore.ts:reorderTasks',
-        'reorder persistence success',
-        { listId: listId ?? null, count: orderedIds.length, topIds: orderedIds.slice(0, 5) },
-        'H4'
-      );
     } catch {
-      debugLog(
-        'taskStore.ts:reorderTasks',
-        'reorder persistence failed, fallback refresh',
-        { listId: listId ?? null, count: orderedIds.length },
-        'H4'
-      );
       await refreshAfterMutation(get, listId);
     }
   },

@@ -6,7 +6,6 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { TaskList } from '@/components/tasks/TaskList';
-import { TODAY_FILTER_ALL } from '@/components/today/TodayListFilter';
 import { INBOX_LIST_ID } from '@/db/constants';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { spacing } from '@/theme/spacing';
@@ -23,7 +22,6 @@ import {
   triggerSuccessHaptic,
 } from '@/utils/haptics';
 import type { Task } from '@/types/task';
-import { debugLog } from '@/utils/debugLog';
 
 type TaskSortMode =
   | 'manual'
@@ -42,11 +40,8 @@ const SORT_OPTIONS: { key: TaskSortMode; label: string }[] = [
   { key: 'color', label: 'Color Tag' },
 ];
 
-function filterTasksByList(tasks: Task[], listFilter: string): Task[] {
-  if (listFilter === TODAY_FILTER_ALL) return tasks;
-  return tasks.filter(
-    (t) => (t.listId ?? INBOX_LIST_ID) === listFilter
-  );
+function filterTasksByList(tasks: Task[], listId: string): Task[] {
+  return tasks.filter((task) => (task.listId ?? INBOX_LIST_ID) === listId);
 }
 
 export default function TodayScreen() {
@@ -71,7 +66,6 @@ export default function TodayScreen() {
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
   const reorderTasks = useTaskStore((s) => s.reorderTasks);
-  const [listFilter] = useState(TODAY_FILTER_ALL);
   const [statusFilter, setStatusFilter] = useState<'all' | 'overdue' | 'today' | 'tomorrow'>('all');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,15 +81,6 @@ export default function TodayScreen() {
   );
 
   const reorderMode = sortMode === 'manual';
-
-  useEffect(() => {
-    debugLog(
-      'index.tsx:useEffect(sortMode)',
-      'today sort mode changed',
-      { sortMode, reorderMode },
-      'H2'
-    );
-  }, [reorderMode, sortMode]);
 
   const allActiveTasks = useMemo(() => {
     const map = new Map<string, Task>();
@@ -117,20 +102,32 @@ export default function TodayScreen() {
     [lists]
   );
 
+  const listNames = useMemo(
+    () => Object.fromEntries(lists.map((list) => [list.id, list.name])),
+    [lists]
+  );
+
+  const listScopedActive = useMemo(
+    () => filterTasksByList(allActiveTasks, defaultListId),
+    [allActiveTasks, defaultListId]
+  );
+
   const filteredActive = useMemo(() => {
     let nextTasks: Task[];
     if (statusFilter === 'overdue') {
-      nextTasks = allActiveTasks.filter((task) => task.dueDate && isOverdue(task.dueDate));
+      nextTasks = listScopedActive.filter(
+        (task) => task.dueDate && isOverdue(task.dueDate)
+      );
     } else if (statusFilter === 'tomorrow') {
-      nextTasks = filterTasksByList(tomorrowTasks, listFilter).filter(
+      nextTasks = filterTasksByList(tomorrowTasks, defaultListId).filter(
         (task) => task.status === 'active'
       );
     } else if (statusFilter === 'today') {
-      nextTasks = filterTasksByList(todayTasks, listFilter).filter(
+      nextTasks = filterTasksByList(todayTasks, defaultListId).filter(
         (task) => task.status === 'active'
       );
     } else {
-      nextTasks = filterTasksByList(allActiveTasks, listFilter);
+      nextTasks = filterTasksByList(allActiveTasks, defaultListId);
     }
     const query = searchQuery.trim().toLowerCase();
     if (query) {
@@ -169,9 +166,9 @@ export default function TodayScreen() {
     }
     return nextTasks;
   }, [
-    allActiveTasks,
+    listScopedActive,
     listColors,
-    listFilter,
+    defaultListId,
     searchQuery,
     sortMode,
     statusFilter,
@@ -182,7 +179,7 @@ export default function TodayScreen() {
   const filteredCompleted = useMemo(() => {
     let completed: Task[];
     if (statusFilter === 'tomorrow') {
-      completed = filterTasksByList(tomorrowCompletedTasks, listFilter);
+      completed = filterTasksByList(tomorrowCompletedTasks, defaultListId);
     } else if (statusFilter === 'today') {
       completed = filterTasksByList(
         todayCompletedTasks.filter(
@@ -190,12 +187,12 @@ export default function TodayScreen() {
             !task.dueDate ||
             (task.dueDate && (isToday(task.dueDate) || isOverdue(task.dueDate)))
         ),
-        listFilter
+        defaultListId
       );
     } else if (statusFilter === 'overdue') {
       completed = [];
     } else {
-      completed = filterTasksByList(todayCompletedTasks, listFilter);
+      completed = filterTasksByList(todayCompletedTasks, defaultListId);
     }
     const query = searchQuery.trim().toLowerCase();
     if (query) {
@@ -207,42 +204,29 @@ export default function TodayScreen() {
     }
     return completed;
   }, [
-    listFilter,
+    defaultListId,
     searchQuery,
     statusFilter,
     todayCompletedTasks,
     tomorrowCompletedTasks,
   ]);
 
-  useEffect(() => {
-    debugLog(
-      'index.tsx:useEffect(filteredActive)',
-      'today filteredActive recalculated',
-      {
-        count: filteredActive.length,
-        topIds: filteredActive.slice(0, 5).map((task) => task.id),
-        statusFilter,
-        searchQueryLength: searchQuery.length,
-        reorderMode,
-      },
-      'H5'
-    );
-  }, [filteredActive, reorderMode, searchQuery.length, statusFilter]);
-
-  const overdueCount = allActiveTasks.filter(
+  const overdueCount = listScopedActive.filter(
     (task) => task.dueDate && isOverdue(task.dueDate)
   ).length;
+  const todayCount = filterTasksByList(todayTasks, defaultListId).filter(
+    (task) => task.status === 'active'
+  ).length;
+  const tomorrowCount = filterTasksByList(tomorrowTasks, defaultListId).filter(
+    (task) => task.status === 'active'
+  ).length;
   const statusTabs = [
-    { key: 'all' as const, label: 'All', count: allActiveTasks.length },
+    { key: 'all' as const, label: 'All', count: listScopedActive.length },
     { key: 'overdue' as const, label: 'Overdue', count: overdueCount },
-    { key: 'today' as const, label: 'Today', count: todayTasks.length },
-    { key: 'tomorrow' as const, label: 'Tomorrow', count: tomorrowTasks.length },
+    { key: 'today' as const, label: 'Today', count: todayCount },
+    { key: 'tomorrow' as const, label: 'Tomorrow', count: tomorrowCount },
   ];
 
-  const addTargetListId =
-    listFilter === TODAY_FILTER_ALL ? defaultListId : listFilter;
-  const addTargetListName =
-    lists.find((l) => l.id === addTargetListId)?.name ?? 'Inbox';
   useEffect(() => {
     if (!adding) return;
     const timer = setTimeout(() => addInputRef.current?.focus(), 60);
@@ -279,7 +263,7 @@ export default function TodayScreen() {
   };
 
   const handleAdd = async (text: string, options?: QuickAddOptions) => {
-    const created = await addTask(text, addTargetListId, options);
+    const created = await addTask(text, defaultListId, options);
     if (!created) {
       Alert.alert('Could not add task', 'Please try again.');
       return;
@@ -328,6 +312,8 @@ export default function TodayScreen() {
             ]}
           >
             {formatHeaderDate()}
+            {' · '}
+            {lists.find((list) => list.id === defaultListId)?.name ?? 'Inbox'}
           </Text>
         </View>
         <Pressable
@@ -474,10 +460,12 @@ export default function TodayScreen() {
     >
       <View style={styles.list}>
         <TaskList
+          key={defaultListId}
           activeTasks={filteredActive}
           completedTasks={filteredCompleted}
           inlineCompleted
           loading={!todayReady}
+          listNames={listNames}
           listColors={listColors}
           emptyMessage={
             statusFilter === 'all'
@@ -493,12 +481,7 @@ export default function TodayScreen() {
           onDelete={handleDelete}
           onSetImportant={setImportant}
           onToggleRecurring={toggleRecurring}
-          onReorder={(orderedIds) =>
-            reorderTasks(
-              orderedIds,
-              listFilter === TODAY_FILTER_ALL ? undefined : listFilter
-            )
-          }
+          onReorder={(orderedIds) => reorderTasks(orderedIds, defaultListId)}
           reorderMode={reorderMode}
         />
         <Pressable

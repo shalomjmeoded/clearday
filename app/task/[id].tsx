@@ -95,6 +95,31 @@ export default function TaskDetailScreen() {
     [refreshAll, refreshList, listId]
   );
 
+  const moveTaskToList = useCallback(
+    async (nextListId: string) => {
+      if (!taskId || nextListId === listId) return;
+      const previousListId = listId;
+      await triggerLightHaptic();
+      setListId(nextListId);
+      setTask((current) => (current ? { ...current, listId: nextListId } : current));
+      try {
+        await taskRepository.update(taskId, { listId: nextListId });
+        await refreshAll();
+        await refreshList(nextListId);
+        if (previousListId !== nextListId) {
+          await refreshList(previousListId);
+        }
+      } catch {
+        setListId(previousListId);
+        setTask((current) =>
+          current ? { ...current, listId: previousListId } : current
+        );
+        Alert.alert('Could not move', 'Please try again.');
+      }
+    },
+    [listId, refreshAll, refreshList, taskId]
+  );
+
   useEffect(() => {
     refreshLists();
   }, [refreshLists]);
@@ -411,7 +436,7 @@ export default function TaskDetailScreen() {
           {lists.map((list) => (
             <Pressable
               key={list.id}
-              onPress={() => setListId(list.id)}
+              onPress={() => moveTaskToList(list.id)}
               style={[
                 styles.chip,
                 {
