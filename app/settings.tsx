@@ -41,14 +41,14 @@ const THEME_OPTIONS: { key: ThemeMode; label: string }[] = [
 
 const COLOR_THEME_OPTIONS: { key: ColorTheme; label: string }[] = [
   { key: 'classic', label: 'Classic' },
-  { key: 'yellow', label: 'Yellow' },
-  { key: 'pink', label: 'Pink' },
   { key: 'mint', label: 'Mint' },
   { key: 'sky', label: 'Sky' },
+  { key: 'yellow', label: 'Yellow' },
+  { key: 'pink', label: 'Pink' },
   { key: 'graphite', label: 'Graphite' },
 ];
 
-const FREE_COLOR_THEME: ColorTheme = 'classic';
+const FREE_COLOR_THEMES = new Set<ColorTheme>(['classic', 'mint', 'sky']);
 
 const BEHAVIOR_OPTIONS: { key: CompletedTaskBehavior; label: string }[] = [
   { key: 'collapse', label: 'Collapse' },
@@ -75,10 +75,10 @@ export default function SettingsScreen() {
   };
 
   const updateColorTheme = async (colorTheme: ColorTheme) => {
-    if (!isPro && colorTheme !== FREE_COLOR_THEME) {
+    if (!isPro && !FREE_COLOR_THEMES.has(colorTheme)) {
       Alert.alert(
         'Do! Pro',
-        'Premium themes are included with Pro.',
+        'That one is a premium theme. Classic, Mint, and Sky are included for free.',
         [
           { text: 'Not now', style: 'cancel' },
           { text: 'View Pro', onPress: () => router.push('/pro') },
