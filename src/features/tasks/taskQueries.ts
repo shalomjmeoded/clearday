@@ -94,13 +94,5 @@ export async function fetchDoneTasks(): Promise<Task[]> {
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM tasks WHERE status = 'completed' AND deletedAt IS NULL ORDER BY completedAt DESC`
   );
-  const all = rows.map(mapRowToTask);
-  const [todayInline, tomorrowInline] = await Promise.all([
-    fetchTodayCompletedTasks(),
-    fetchTomorrowCompletedTasks(),
-  ]);
-  const inlineIds = new Set(
-    [...todayInline, ...tomorrowInline].map((task) => task.id)
-  );
-  return all.filter((task) => !inlineIds.has(task.id));
+  return rows.map(mapRowToTask);
 }

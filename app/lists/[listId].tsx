@@ -5,6 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import { Screen } from '@/components/layout/Screen';
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
+import { HeaderBackButton } from '@/components/navigation/HeaderBackButton';
 import { TaskList } from '@/components/tasks/TaskList';
 import { listRepository } from '@/features/lists/listRepository';
 import { spacing } from '@/theme/spacing';
@@ -62,11 +63,7 @@ export default function ListDetailScreen() {
 
   const header = (
     <View style={styles.header}>
-      <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back}>
-        <Text style={[typography.button, { color: tokens.accent, fontSize: 16 }]}>
-          ← Back
-        </Text>
-      </Pressable>
+      <HeaderBackButton tokens={tokens} />
       <View style={styles.titleRow}>
         {listColor ? (
           <View style={[styles.colorDot, { backgroundColor: listColor }]} />
@@ -152,7 +149,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.sm,
   },
-  back: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   colorDot: { width: 12, height: 12, borderRadius: 6 },
   orderButton: {

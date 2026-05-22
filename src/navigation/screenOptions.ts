@@ -1,5 +1,7 @@
 import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
+import { createElement } from 'react';
 
+import { HeaderBackButton } from '@/components/navigation/HeaderBackButton';
 import type { ThemeTokens } from '@/theme/tokens';
 
 const STACK_ANIM_MS = 160;
@@ -25,7 +27,8 @@ export function modalScreenOptions(
     headerStyle: { backgroundColor: tokens.background },
     headerTintColor: tokens.accent,
     headerShadowVisible: false,
-    headerBackVisible: true,
+    headerBackVisible: false,
+    headerLeft: () => createElement(HeaderBackButton, { tokens }),
     contentStyle: { backgroundColor: tokens.background },
     animation: 'fade_from_bottom',
     animationDuration: MODAL_ANIM_MS,

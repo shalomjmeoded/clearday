@@ -160,9 +160,9 @@ export function TaskList({
   const hideCompleted = behavior === 'hide';
   const collapseCompleted = behavior === 'collapse';
 
-  const showCompletedInline = inlineCompleted || behavior === 'show';
-  const showCompletedSection =
-    !inlineCompleted && collapseCompleted && !hideCompleted;
+  const showCompletedInline =
+    !hideCompleted && !collapseCompleted && (inlineCompleted || behavior === 'show');
+  const showCompletedSection = collapseCompleted && !hideCompleted;
 
   const activeTaskIds = useMemo(
     () => new Set(activeTasks.map((task) => task.id)),

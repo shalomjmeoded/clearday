@@ -6,19 +6,13 @@ import { Stack } from 'expo-router';
 import { FormScreen } from '@/components/layout/FormScreen';
 import { ReminderTimePicker } from '@/components/reminders/ReminderTimePicker';
 import {
-  runExportWithFeedback,
-  runImportWithFeedback,
-} from '@/features/backup/backupService';
-import {
   SettingsChips,
   SettingsGroup,
   SettingsRow,
 } from '@/components/ui/SettingsGroup';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
-import { useListStore } from '@/store/listStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type {
   ColorTheme,
@@ -65,9 +59,6 @@ export default function SettingsScreen() {
   const settings = useSettingsStore((s) => s.settings);
   const isPro = settings.isPro;
   const setSetting = useSettingsStore((s) => s.setSetting);
-  const hydrateSettings = useSettingsStore((s) => s.hydrate);
-  const refreshAll = useTaskStore((s) => s.refreshAll);
-  const refreshLists = useListStore((s) => s.refresh);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
   const defaultTime = parseTimeKey(settings.defaultReminderTime);
   const [pickerHours, setPickerHours] = useState(defaultTime.hours);
@@ -79,14 +70,6 @@ export default function SettingsScreen() {
   ) => {
     await triggerSelectionHaptic();
     await setSetting(key, value);
-  };
-
-  const handleImport = () => {
-    void runImportWithFeedback(async () => {
-      await hydrateSettings();
-      await refreshAll();
-      await refreshLists();
-    });
   };
 
   return (
@@ -194,14 +177,6 @@ export default function SettingsScreen() {
           <Text style={[typography.meta, styles.hint, { color: tokens.mutedText }]}>
             {BACKUP_SECTION_BODY}
           </Text>
-          <SettingsRow
-            label="Export Backup"
-            onPress={() => void runExportWithFeedback()}
-          />
-          <SettingsRow
-            label="Import Backup"
-            onPress={handleImport}
-          />
           <SettingsRow
             label="Cloud Sync"
             value="Coming later"
