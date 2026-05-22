@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { Alert, StyleSheet, Text } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { FormScreen } from '@/components/layout/FormScreen';
@@ -48,6 +48,8 @@ const COLOR_THEME_OPTIONS: { key: ColorTheme; label: string }[] = [
   { key: 'graphite', label: 'Graphite' },
 ];
 
+const FREE_COLOR_THEME: ColorTheme = 'classic';
+
 const BEHAVIOR_OPTIONS: { key: CompletedTaskBehavior; label: string }[] = [
   { key: 'collapse', label: 'Collapse' },
   { key: 'hide', label: 'Hide' },
@@ -70,6 +72,21 @@ export default function SettingsScreen() {
   ) => {
     await triggerSelectionHaptic();
     await setSetting(key, value);
+  };
+
+  const updateColorTheme = async (colorTheme: ColorTheme) => {
+    if (!isPro && colorTheme !== FREE_COLOR_THEME) {
+      Alert.alert(
+        'Do! Pro',
+        'Premium themes are included with Pro.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View Pro', onPress: () => router.push('/pro') },
+        ]
+      );
+      return;
+    }
+    await update('colorTheme', colorTheme);
   };
 
   return (
@@ -96,7 +113,7 @@ export default function SettingsScreen() {
           <SettingsChips
             options={COLOR_THEME_OPTIONS}
             value={settings.colorTheme}
-            onChange={(t) => update('colorTheme', t)}
+            onChange={updateColorTheme}
           />
         </SettingsGroup>
 

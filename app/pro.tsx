@@ -67,8 +67,7 @@ export default function ProScreen() {
             Make Do! yours.
           </Text>
           <Text style={[typography.body, styles.subtitle, { color: tokens.mutedText }]}>
-            Unlock unlimited lists, recurring tasks, advanced reminders, widgets, premium
-            themes, backup/export, sync, shared lists, voice capture, and insights.
+            Unlock unlimited lists, recurring tasks, and premium themes.
           </Text>
 
           <View style={styles.plans}>
