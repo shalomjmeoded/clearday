@@ -23,6 +23,7 @@ import {
 } from '@/features/reminders/reminderService';
 import { taskRepository } from '@/features/tasks/taskRepository';
 import { useListStore } from '@/store/listStore';
+import { useProStore } from '@/store/proStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { spacing } from '@/theme/spacing';
@@ -82,7 +83,7 @@ export default function TaskDetailScreen() {
   const [reminderPickerMinutes, setReminderPickerMinutes] = useState(0);
   const [titleError, setTitleError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
-  const isPro = useSettingsStore((s) => s.settings.isPro);
+  const isPro = useProStore((s) => s.isPro);
 
   const refreshViews = useCallback(
     async (previousListId?: string) => {

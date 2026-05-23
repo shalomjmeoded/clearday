@@ -16,6 +16,7 @@ import type { QuickAddOptions } from '@/types/quickAdd';
 import type { Task } from '@/types/task';
 import { INBOX_LIST_ID } from '@/db/constants';
 import { listRepository } from '@/features/lists/listRepository';
+import { getIsPro } from '@/store/proStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
 import { isRecurring } from '@/utils/recurrence';
@@ -187,7 +188,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
     if (options?.priority) priority = options.priority;
 
-    const isPro = useSettingsStore.getState().settings.isPro;
+    const isPro = getIsPro();
     if (recurrence && isRecurring(recurrence) && !isPro) {
       recurrence = DEFAULT_RECURRENCE;
     }
@@ -271,7 +272,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   toggleRecurring: async (id) => {
-    const isPro = useSettingsStore.getState().settings.isPro;
+    const isPro = getIsPro();
     const existing = await taskRepository.getById(id);
     if (!existing) return;
 

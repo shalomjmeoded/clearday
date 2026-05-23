@@ -6,7 +6,7 @@ import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
-import { useSettingsStore } from '@/store/settingsStore';
+import { useProStore } from '@/store/proStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import { triggerSelectionHaptic } from '@/utils/haptics';
 
@@ -49,7 +49,7 @@ function LinkRow({
 
 export default function MoreScreen() {
   const { tokens } = useTheme();
-  const isPro = useSettingsStore((s) => s.settings.isPro);
+  const isPro = useProStore((s) => s.isPro);
 
   const open = async (path: '/settings' | '/pro' | '/finished' | '/help') => {
     await triggerSelectionHaptic();

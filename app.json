@@ -15,7 +15,8 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.clearday.app"
+      "bundleIdentifier": "com.do.simpletodo",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +25,8 @@
       },
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.clearday.app"
+      "package": "com.do.simpletodo",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -33,6 +35,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-dev-client",
       [
         "expo-splash-screen",
         {

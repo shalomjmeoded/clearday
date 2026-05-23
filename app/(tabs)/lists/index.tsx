@@ -16,6 +16,7 @@ import { canCreateCustomList } from '@/features/pro/subscriptionService';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useListStore } from '@/store/listStore';
+import { useProStore } from '@/store/proStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import {
@@ -27,7 +28,7 @@ import {
 export default function ListsScreen() {
   const { tokens } = useTheme();
   const scrollRef = useRef<ScrollScreenHandle>(null);
-  const isPro = useSettingsStore((s) => s.settings.isPro);
+  const isPro = useProStore((s) => s.isPro);
   const defaultListId = useSettingsStore((s) => s.settings.defaultListId);
   const setSetting = useSettingsStore((s) => s.setSetting);
   const lists = useListStore((s) => s.lists);
