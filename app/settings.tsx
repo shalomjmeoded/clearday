@@ -13,6 +13,7 @@ import {
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useProStore } from '@/store/proStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type {
   ColorTheme,
@@ -59,7 +60,7 @@ const BEHAVIOR_OPTIONS: { key: CompletedTaskBehavior; label: string }[] = [
 export default function SettingsScreen() {
   const { tokens } = useTheme();
   const settings = useSettingsStore((s) => s.settings);
-  const isPro = settings.isPro;
+  const isPro = useProStore((s) => s.isPro);
   const setSetting = useSettingsStore((s) => s.setSetting);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
   const defaultTime = parseTimeKey(settings.defaultReminderTime);

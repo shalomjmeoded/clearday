@@ -1,70 +1,254 @@
-import { Alert } from 'react-native';
-import { router } from 'expo-router';
+import Purchases, {
+  PURCHASES_ERROR_CODE,
+  type CustomerInfo,
+  type PurchasesOfferings,
+  type PurchasesPackage,
+} from 'react-native-purchases';
 
-import { useSettingsStore } from '@/store/settingsStore';
+import { PRO_ENTITLEMENT_ID } from '@/features/pro/products';
+import {
+  getRevenueCatApiKey,
+  isPurchasesSupported,
+  warnIfMissingRevenueCatKey,
+} from '@/features/pro/revenueCatConfig';
 
-/**
- * Subscription abstraction — MVP uses MockSubscriptionProvider (settings.isPro).
- *
- * Phase 2: replace with RevenueCatSubscriptionProvider:
- *   - isPro() → RevenueCat entitlements
- *   - presentPaywall() → RevenueCat paywall / Customer Center
- *   - restorePurchases() → Purchases.restorePurchases() (App Store / Play)
- */
-export interface SubscriptionProvider {
-  isPro(): Promise<boolean>;
-  presentPaywall(): Promise<void>;
-  restorePurchases(): Promise<void>;
-}
-
-class MockSubscriptionProvider implements SubscriptionProvider {
-  async isPro(): Promise<boolean> {
-    return useSettingsStore.getState().settings.isPro;
-  }
-
-  async presentPaywall(): Promise<void> {
-    router.push('/pro');
-  }
-
-  async restorePurchases(): Promise<void> {
-    Alert.alert(
-      'Restore purchases',
-      'Purchase restore will be available when real subscriptions are enabled.'
-    );
-  }
-}
-
-/** Swap this instance when RevenueCat is integrated. */
-let provider: SubscriptionProvider = new MockSubscriptionProvider();
-
-export function setSubscriptionProvider(next: SubscriptionProvider): void {
-  provider = next;
-}
-
-export const subscriptionService: SubscriptionProvider = {
-  isPro: () => provider.isPro(),
-  presentPaywall: () => provider.presentPaywall(),
-  restorePurchases: () => provider.restorePurchases(),
+export type ProEntitlement = {
+  isPro: boolean;
+  source: 'revenuecat' | 'mock' | 'unknown';
+  expiresAt?: string | null;
 };
 
-/** Sync read for UI — backed by SQLite settings.isPro in MVP. */
-export function getIsPro(): boolean {
-  return useSettingsStore.getState().settings.isPro;
+export type ProPackage = {
+  id: string;
+  identifier: string;
+  title: string;
+  description?: string;
+  priceString: string;
+  productId: string;
+  packageType?: string;
+};
+
+export interface SubscriptionService {
+  configure(): Promise<void>;
+  getProStatus(mockPro?: boolean): Promise<ProEntitlement>;
+  getOfferings(): Promise<ProPackage[]>;
+  purchase(productId: string): Promise<ProEntitlement>;
+  restorePurchases(): Promise<ProEntitlement>;
 }
 
+let configured = false;
+let customerInfoListenerAttached = false;
+
+function mapCustomerInfoToEntitlement(info: CustomerInfo | null): ProEntitlement {
+  const active = info?.entitlements.active[PRO_ENTITLEMENT_ID];
+
+  if (!active) {
+    return { isPro: false, source: 'revenuecat', expiresAt: null };
+  }
+
+  return {
+    isPro: true,
+    source: 'revenuecat',
+    expiresAt: active.expirationDate ?? null,
+  };
+}
+
+function mergeWithMock(
+  entitlement: ProEntitlement,
+  mockPro: boolean
+): ProEntitlement {
+  if (!__DEV__ || !mockPro) return entitlement;
+
+  if (entitlement.isPro) return entitlement;
+
+  return { isPro: true, source: 'mock', expiresAt: null };
+}
+
+function isUserCancelled(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const purchaseError = error as { userCancelled?: boolean; code?: string };
+
+  if (purchaseError.userCancelled) return true;
+
+  return purchaseError.code === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED_ERROR;
+}
+
+function isNetworkError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const purchaseError = error as { code?: string };
+
+  return (
+    purchaseError.code === PURCHASES_ERROR_CODE.NETWORK_ERROR ||
+    purchaseError.code === PURCHASES_ERROR_CODE.OFFLINE_CONNECTION_ERROR
+  );
+}
+
+function mapPackage(pkg: PurchasesPackage): ProPackage {
+  return {
+    id: pkg.identifier,
+    identifier: pkg.identifier,
+    title: pkg.product.title,
+    description: pkg.product.description,
+    priceString: pkg.product.priceString,
+    productId: pkg.product.identifier,
+    packageType: pkg.packageType,
+  };
+}
+
+function findPackage(
+  offerings: PurchasesOfferings,
+  productId: string
+): PurchasesPackage | null {
+  const packages = offerings.current?.availablePackages ?? [];
+
+  return (
+    packages.find(
+      (pkg) =>
+        pkg.product.identifier === productId || pkg.identifier === productId
+    ) ?? null
+  );
+}
+
+class RevenueCatSubscriptionService implements SubscriptionService {
+  async configure(): Promise<void> {
+    if (configured || !isPurchasesSupported()) return;
+
+    const apiKey = getRevenueCatApiKey();
+    warnIfMissingRevenueCatKey();
+
+    if (!apiKey) return;
+
+    try {
+      if (__DEV__) {
+        Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
+      }
+
+      Purchases.configure({ apiKey });
+      configured = true;
+
+      if (!customerInfoListenerAttached) {
+        Purchases.addCustomerInfoUpdateListener(() => {
+          void import('@/store/proStore').then(({ useProStore }) => {
+            void useProStore.getState().refreshProStatus();
+          });
+        });
+        customerInfoListenerAttached = true;
+      }
+    } catch (error) {
+      console.warn('[RevenueCat] configure failed:', error);
+    }
+  }
+
+  async getProStatus(mockPro = false): Promise<ProEntitlement> {
+    if (!configured) {
+      return mergeWithMock({ isPro: false, source: 'unknown' }, mockPro);
+    }
+
+    try {
+      const info = await Purchases.getCustomerInfo();
+      return mergeWithMock(mapCustomerInfoToEntitlement(info), mockPro);
+    } catch (error) {
+      console.warn('[RevenueCat] getProStatus failed:', error);
+      return mergeWithMock({ isPro: false, source: 'unknown' }, mockPro);
+    }
+  }
+
+  async getOfferings(): Promise<ProPackage[]> {
+    if (!configured) return [];
+
+    try {
+      const offerings = await Purchases.getOfferings();
+      const current = offerings.current;
+
+      if (!current?.availablePackages.length) return [];
+
+      return current.availablePackages.map(mapPackage);
+    } catch (error) {
+      console.warn('[RevenueCat] getOfferings failed:', error);
+      return [];
+    }
+  }
+
+  async purchase(productId: string): Promise<ProEntitlement> {
+    if (!configured) {
+      throw new Error('Purchases not configured');
+    }
+
+    try {
+      const offerings = await Purchases.getOfferings();
+      const pkg = findPackage(offerings, productId);
+
+      if (!pkg) {
+        throw new Error('Product not available');
+      }
+
+      const { customerInfo } = await Purchases.purchasePackage(pkg);
+      return mapCustomerInfoToEntitlement(customerInfo);
+    } catch (error) {
+      if (isUserCancelled(error)) {
+        throw Object.assign(new Error('Purchase cancelled'), {
+          userCancelled: true,
+        });
+      }
+
+      if (isNetworkError(error)) {
+        throw Object.assign(new Error('No internet connection'), {
+          networkError: true,
+        });
+      }
+
+      console.warn('[RevenueCat] purchase failed:', error);
+      throw error;
+    }
+  }
+
+  async restorePurchases(): Promise<ProEntitlement> {
+    if (!configured) {
+      return { isPro: false, source: 'unknown' };
+    }
+
+    try {
+      const info = await Purchases.restorePurchases();
+      return mapCustomerInfoToEntitlement(info);
+    } catch (error) {
+      if (isNetworkError(error)) {
+        throw Object.assign(new Error('No internet connection'), {
+          networkError: true,
+        });
+      }
+
+      console.warn('[RevenueCat] restore failed:', error);
+      throw error;
+    }
+  }
+}
+
+export const revenueCatSubscriptionService = new RevenueCatSubscriptionService();
+
 export async function canCreateCustomList(): Promise<boolean> {
-  if (await subscriptionService.isPro()) return true;
+  const { getIsPro } = await import('@/store/proStore');
+
+  if (getIsPro()) return true;
+
   const { listRepository } = await import('@/features/lists/listRepository');
   const customCount = await listRepository.countCustomLists();
+
   return customCount < 1;
 }
 
 export async function getCustomListLimitMessage(): Promise<string | null> {
-  if (await subscriptionService.isPro()) return null;
+  const { getIsPro } = await import('@/store/proStore');
+
+  if (getIsPro()) return null;
+
   const { listRepository } = await import('@/features/lists/listRepository');
   const customCount = await listRepository.countCustomLists();
+
   if (customCount >= 1) {
     return 'Free includes one custom list. Go Pro for unlimited lists.';
   }
+
   return null;
 }

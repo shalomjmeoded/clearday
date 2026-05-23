@@ -3,8 +3,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, useColorScheme } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, StyleSheet, useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 
 import { BootstrapScreen } from '@/components/layout/BootstrapScreen';
@@ -21,6 +21,7 @@ import {
   stackScreenOptions,
 } from '@/navigation/screenOptions';
 import { useListStore } from '@/store/listStore';
+import { useProStore } from '@/store/proStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { buildNavigationTheme } from '@/theme/navigationTheme';
@@ -65,6 +66,7 @@ function AppNavigator() {
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const colorScheme = useColorScheme();
+  const appState = useRef(AppState.currentState);
   const rootBackground =
     colorScheme === 'dark' ? SPLASH_BACKGROUND_DARK : SPLASH_BACKGROUND_LIGHT;
 
@@ -76,6 +78,7 @@ export default function RootLayout() {
         await useSettingsStore.getState().hydrate();
         await useTaskStore.getState().refreshAll();
         await useListStore.getState().refresh();
+        void useProStore.getState().initializePurchases();
       } catch (error) {
         console.error('Do! bootstrap failed:', error);
       } finally {
@@ -84,6 +87,19 @@ export default function RootLayout() {
       }
     }
     bootstrap();
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const wasBackground = appState.current.match(/inactive|background/);
+      appState.current = nextState;
+
+      if (wasBackground && nextState === 'active') {
+        void useProStore.getState().refreshProStatus();
+      }
+    });
+
+    return () => subscription.remove();
   }, []);
 
   return (

@@ -17,7 +17,16 @@ export const FREE_PLAN_FEATURES = [
 export const PRO_INCLUDED_FEATURES = [
   'Unlimited lists',
   'Recurring tasks',
+  'Advanced reminders',
+  'Advanced widgets',
   'Premium themes',
+  'Custom app icons',
+  'Backup/export',
+  'Future cloud sync',
+  'Shared lists',
+  'Voice capture',
+  'Smarter parsing',
+  'Completion insights',
 ] as const;
 
 /** @deprecated Pro screen uses PRO_INCLUDED_FEATURES only. */

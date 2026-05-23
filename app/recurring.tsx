@@ -6,12 +6,12 @@ import { FormScreen } from '@/components/layout/FormScreen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
-import { useSettingsStore } from '@/store/settingsStore';
+import { useProStore } from '@/store/proStore';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export default function RecurringTasksScreen() {
   const { tokens } = useTheme();
-  const isPro = useSettingsStore((s) => s.settings.isPro);
+  const isPro = useProStore((s) => s.isPro);
 
   if (!isPro) {
     return (

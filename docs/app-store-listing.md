@@ -46,7 +46,7 @@ todo, tasks, minimalist, private, local, offline, no ads, simple, focus, list
 
 ## Manual steps before submission
 
-- Confirm iOS bundle identifier (`com.clearday.app` in app.json today — update to production ID when ready)
-- Confirm Android package name (`com.clearday.app` in app.json today — update to production ID when ready)
+- Confirm iOS bundle identifier (`com.do.simpletodo` in app.json)
+- Confirm Android package name (`com.do.simpletodo` in app.json)
 - Upload new Do! icon and splash screenshots from `assets/images/`
 - Set store listing subtitle to: Minimalist, private Todo list app
