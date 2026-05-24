@@ -33,13 +33,6 @@ const FALLBACK_PLANS = [
     period: '/ year',
     featured: true,
   },
-  {
-    id: PRODUCT_IDS.lifetime,
-    label: 'Lifetime',
-    packageId: PACKAGE_IDENTIFIERS.lifetime,
-    price: getPlanDisplayPrice(PRODUCT_IDS.lifetime)!,
-    period: 'once',
-  },
 ] as const;
 
 export default function ProScreen() {
@@ -65,25 +58,23 @@ export default function ProScreen() {
 
   const plans =
     offerings.length > 0
-      ? offerings.map((pkg) => ({
+      ? offerings
+        .filter((pkg) => pkg.identifier !== 'lifetime')
+        .map((pkg) => ({
           id: pkg.productId,
           label:
             pkg.identifier === PACKAGE_IDENTIFIERS.monthly
               ? 'Monthly'
               : pkg.identifier === PACKAGE_IDENTIFIERS.yearly
                 ? 'Yearly'
-                : pkg.identifier === PACKAGE_IDENTIFIERS.lifetime
-                  ? 'Lifetime'
-                  : pkg.title,
+                : pkg.title,
           price: getPlanDisplayPrice(pkg.productId) ?? pkg.priceString,
           period:
             pkg.identifier === PACKAGE_IDENTIFIERS.monthly
               ? '/ month'
               : pkg.identifier === PACKAGE_IDENTIFIERS.yearly
                 ? '/ year'
-                : pkg.identifier === PACKAGE_IDENTIFIERS.lifetime
-                  ? 'once'
-                  : '',
+                : '',
           featured: pkg.identifier === PACKAGE_IDENTIFIERS.yearly,
         }))
       : FALLBACK_PLANS.map((plan) => ({
