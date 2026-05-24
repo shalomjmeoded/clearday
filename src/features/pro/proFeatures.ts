@@ -9,7 +9,6 @@ export const FREE_PLAN_FEATURES = [
   'Light/dark/system theme',
   'Local storage',
   'Finished tasks',
-  '0 ads',
   'Private on-device task storage',
 ] as const;
 

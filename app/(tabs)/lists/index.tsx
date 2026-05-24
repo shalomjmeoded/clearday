@@ -105,7 +105,7 @@ export default function ListsScreen() {
             onPress={async () => {
               await triggerSelectionHaptic();
               await setSetting('defaultListId', item.id);
-              router.push('/(tabs)/');
+              router.push('/');
             }}
             onLongPress={() => openListEdit(item.id)}
           />

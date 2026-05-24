@@ -1,11 +1,16 @@
 import Purchases, {
   PURCHASES_ERROR_CODE,
   type CustomerInfo,
+  type PurchasesOffering,
   type PurchasesOfferings,
   type PurchasesPackage,
 } from 'react-native-purchases';
 
-import { PRO_ENTITLEMENT_ID } from '@/features/pro/products';
+import {
+  PRO_ENTITLEMENT_ID,
+  REVENUECAT_OFFERING_ID,
+  isKnownSubscriptionProduct,
+} from '@/features/pro/products';
 import {
   getRevenueCatApiKey,
   isPurchasesSupported,
@@ -40,10 +45,17 @@ let configured = false;
 let customerInfoListenerAttached = false;
 
 function mapCustomerInfoToEntitlement(info: CustomerInfo | null): ProEntitlement {
+  // RevenueCat is the source of truth: when this entitlement is present in
+  // CustomerInfo.entitlements.active, the user gets Pro feature unlocks. When
+  // it is absent or expires, Pro gates lock again.
   const active = info?.entitlements.active[PRO_ENTITLEMENT_ID];
 
   if (!active) {
-    return { isPro: false, source: 'revenuecat', expiresAt: null };
+    return {
+      isPro: false,
+      source: 'revenuecat',
+      expiresAt: null,
+    };
   }
 
   return {
@@ -97,11 +109,21 @@ function mapPackage(pkg: PurchasesPackage): ProPackage {
   };
 }
 
-function findPackage(
-  offerings: PurchasesOfferings,
-  productId: string
-): PurchasesPackage | null {
-  const packages = offerings.current?.availablePackages ?? [];
+function getDefaultOffering(offerings: PurchasesOfferings): PurchasesOffering | null {
+  return offerings.all[REVENUECAT_OFFERING_ID] ?? offerings.current ?? null;
+}
+
+function getSubscriptionPackages(offerings: PurchasesOfferings): PurchasesPackage[] {
+  const offering = getDefaultOffering(offerings);
+  const packages = offering?.availablePackages ?? [];
+
+  return packages.filter((pkg) =>
+    isKnownSubscriptionProduct(pkg.product.identifier)
+  );
+}
+
+function findPackage(offerings: PurchasesOfferings, productId: string): PurchasesPackage | null {
+  const packages = getSubscriptionPackages(offerings);
 
   return (
     packages.find(
@@ -143,7 +165,10 @@ class RevenueCatSubscriptionService implements SubscriptionService {
 
   async getProStatus(mockPro = false): Promise<ProEntitlement> {
     if (!configured) {
-      return mergeWithMock({ isPro: false, source: 'unknown' }, mockPro);
+      return mergeWithMock(
+        { isPro: false, source: 'unknown' },
+        mockPro
+      );
     }
 
     try {
@@ -151,7 +176,10 @@ class RevenueCatSubscriptionService implements SubscriptionService {
       return mergeWithMock(mapCustomerInfoToEntitlement(info), mockPro);
     } catch (error) {
       console.warn('[RevenueCat] getProStatus failed:', error);
-      return mergeWithMock({ isPro: false, source: 'unknown' }, mockPro);
+      return mergeWithMock(
+        { isPro: false, source: 'unknown' },
+        mockPro
+      );
     }
   }
 
@@ -160,11 +188,11 @@ class RevenueCatSubscriptionService implements SubscriptionService {
 
     try {
       const offerings = await Purchases.getOfferings();
-      const current = offerings.current;
+      const packages = getSubscriptionPackages(offerings);
 
-      if (!current?.availablePackages.length) return [];
+      if (!packages.length) return [];
 
-      return current.availablePackages.map(mapPackage);
+      return packages.map(mapPackage);
     } catch (error) {
       console.warn('[RevenueCat] getOfferings failed:', error);
       return [];

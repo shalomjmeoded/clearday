@@ -9,7 +9,11 @@ import {
   presentCustomerCenter,
   presentRevenueCatPaywall,
 } from '@/features/pro/paywallService';
-import { PACKAGE_IDENTIFIERS, PRODUCT_IDS, getPlanDisplayPrice } from '@/features/pro/products';
+import {
+  PRODUCT_IDS,
+  getPlanLabel,
+  getPlanPeriod,
+} from '@/features/pro/products';
 import { PRO_INCLUDED_FEATURES } from '@/features/pro/proFeatures';
 import { useProStore } from '@/store/proStore';
 import { radius, spacing } from '@/theme/spacing';
@@ -21,15 +25,13 @@ const FALLBACK_PLANS = [
   {
     id: PRODUCT_IDS.monthly,
     label: 'Monthly',
-    packageId: PACKAGE_IDENTIFIERS.monthly,
-    price: getPlanDisplayPrice(PRODUCT_IDS.monthly)!,
+    price: 'Unavailable',
     period: '/ month',
   },
   {
     id: PRODUCT_IDS.yearly,
     label: 'Yearly',
-    packageId: PACKAGE_IDENTIFIERS.yearly,
-    price: getPlanDisplayPrice(PRODUCT_IDS.yearly)!,
+    price: 'Unavailable',
     period: '/ year',
     featured: true,
   },
@@ -59,23 +61,12 @@ export default function ProScreen() {
   const plans =
     offerings.length > 0
       ? offerings
-        .filter((pkg) => pkg.identifier !== 'lifetime')
         .map((pkg) => ({
           id: pkg.productId,
-          label:
-            pkg.identifier === PACKAGE_IDENTIFIERS.monthly
-              ? 'Monthly'
-              : pkg.identifier === PACKAGE_IDENTIFIERS.yearly
-                ? 'Yearly'
-                : pkg.title,
-          price: getPlanDisplayPrice(pkg.productId) ?? pkg.priceString,
-          period:
-            pkg.identifier === PACKAGE_IDENTIFIERS.monthly
-              ? '/ month'
-              : pkg.identifier === PACKAGE_IDENTIFIERS.yearly
-                ? '/ year'
-                : '',
-          featured: pkg.identifier === PACKAGE_IDENTIFIERS.yearly,
+          label: getPlanLabel(pkg.productId),
+          price: pkg.priceString,
+          period: getPlanPeriod(pkg.productId),
+          featured: pkg.productId === PRODUCT_IDS.yearly,
         }))
       : FALLBACK_PLANS.map((plan) => ({
           id: plan.id,

@@ -30,10 +30,6 @@ function parseSettings(rows: { key: string; value: string }[]): AppSettings {
       (map.swipeRightAction as TaskSwipeAction) ??
       DEFAULT_SETTINGS.swipeRightAction,
     defaultListId: map.defaultListId ?? DEFAULT_SETTINGS.defaultListId ?? INBOX_LIST_ID,
-    isPro:
-      map.isPro === undefined
-        ? DEFAULT_SETTINGS.isPro
-        : map.isPro === 'true',
   };
 }
 

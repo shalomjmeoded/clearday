@@ -45,7 +45,6 @@ async function seedDefaults(): Promise<void> {
     ['swipeLeftAction', DEFAULT_SETTINGS.swipeLeftAction],
     ['swipeRightAction', DEFAULT_SETTINGS.swipeRightAction],
     ['defaultListId', DEFAULT_SETTINGS.defaultListId],
-    ['isPro', String(DEFAULT_SETTINGS.isPro)],
     ['schemaVersion', String(SCHEMA_VERSION)],
   ];
 

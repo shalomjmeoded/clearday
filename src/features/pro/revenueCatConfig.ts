@@ -5,6 +5,9 @@ export function isPurchasesSupported(): boolean {
 }
 
 export function getRevenueCatApiKey(): string | null {
+  // Put EXPO_PUBLIC_REVENUECAT_API_KEY=appl_xxxxx in .env locally and in
+  // EAS environment variables for cloud builds. Expo exposes EXPO_PUBLIC_*
+  // values to the client bundle, so use RevenueCat public SDK keys only here.
   const fallback = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY?.trim() || null;
 
   if (Platform.OS === 'ios') {

@@ -15,7 +15,6 @@ export interface AppSettings {
   swipeRightAction: TaskSwipeAction;
   /** New tasks from Today and undated “today” tasks use this list. */
   defaultListId: string;
-  isPro: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -27,5 +26,4 @@ export const DEFAULT_SETTINGS: AppSettings = {
   swipeLeftAction: 'tomorrow',
   swipeRightAction: 'archive',
   defaultListId: INBOX_LIST_ID,
-  isPro: false,
 };

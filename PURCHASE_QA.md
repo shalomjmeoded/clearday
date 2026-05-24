@@ -1,12 +1,12 @@
 # Purchase QA checklist
 
-Manual QA for RevenueCat / StepsApp Pro in Do! (clearday).
+Manual QA for RevenueCat / Do! Pro in Do! (clearday).
 
 ## Prerequisites
 
 - [ ] `.env` has valid RevenueCat API key
 - [ ] EAS development or production build installed (not Expo Go for real IAP)
-- [ ] RevenueCat offering is **current** with monthly / yearly / lifetime packages
+- [ ] RevenueCat `default` offering is **current** with monthly / yearly packages
 - [ ] Store products active; sandbox / license tester account ready
 
 ## Offerings & UI
@@ -24,7 +24,6 @@ Manual QA for RevenueCat / StepsApp Pro in Do! (clearday).
 
 - [ ] **Monthly** purchase completes; Pro active badge shows
 - [ ] **Yearly** purchase completes
-- [ ] **Lifetime** purchase completes
 - [ ] Cancelled purchase dismisses without crash or error spam
 - [ ] Failed purchase (airplane mode) shows network / error message
 - [ ] Paywall purchase updates Pro state
@@ -38,7 +37,7 @@ Manual QA for RevenueCat / StepsApp Pro in Do! (clearday).
 
 ## Entitlement & gates
 
-- [ ] `pro` entitlement unlocks Pro in app
+- [ ] `Do! Simple Ad-Free To Do List Pro` entitlement unlocks Pro in app
 - [ ] Second custom list blocked when free; allowed when Pro
 - [ ] Recurring tasks gated when free; allowed when Pro
 - [ ] Premium themes gated when free
@@ -52,7 +51,6 @@ Manual QA for RevenueCat / StepsApp Pro in Do! (clearday).
 ## Privacy & scope
 
 - [ ] No task content sent to RevenueCat (only purchase / entitlement checks)
-- [ ] No ads SDK added
 - [ ] No login / backend for purchases
 - [ ] No analytics / tracking SDK added
 - [ ] Mock Pro toggle visible only in `__DEV__` builds

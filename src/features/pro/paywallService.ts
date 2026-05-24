@@ -47,7 +47,7 @@ export async function presentRevenueCatPaywall(): Promise<PaywallFlowResult> {
   }
 }
 
-/** Present paywall only when StepsApp Pro is not active. */
+/** Present paywall only when the RevenueCat Pro entitlement is not active. */
 export async function presentPaywallIfNeeded(): Promise<PaywallFlowResult> {
   if (!isPurchasesSupported()) return 'not_presented';
 
