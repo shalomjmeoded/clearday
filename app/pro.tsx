@@ -13,9 +13,8 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { triggerSelectionHaptic } from '@/utils/haptics';
 
 const PLANS = [
-  { id: 'monthly', label: 'Monthly', price: '$1.99', period: '/ month' },
-  { id: 'yearly', label: 'Yearly', price: '$14.99', period: '/ year', featured: true },
-  { id: 'lifetime', label: 'Lifetime', price: '$34.99', period: 'once' },
+  { id: 'monthly', label: 'Monthly', price: '$3.99', period: '/ month' },
+  { id: 'yearly', label: 'Yearly', price: '$19.99', period: '/ year', featured: true },
 ];
 
 export default function ProScreen() {
