@@ -5,10 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { PRO_PRIVACY_NOTE } from '@/constants/privacyCopy';
-import {
-  presentCustomerCenter,
-  presentRevenueCatPaywall,
-} from '@/features/pro/paywallService';
+import { presentCustomerCenter } from '@/features/pro/paywallService';
 import {
   PRODUCT_IDS,
   getPlanLabel,
@@ -86,11 +83,6 @@ export default function ProScreen() {
     const result = await restorePurchases();
     Alert.alert('Restore Purchases', result.message);
   }, [restorePurchases]);
-
-  const handleRevenueCatPaywall = useCallback(async () => {
-    await triggerSelectionHaptic();
-    await presentRevenueCatPaywall();
-  }, []);
 
   const handleCustomerCenter = useCallback(async () => {
     await triggerSelectionHaptic();
@@ -220,18 +212,6 @@ export default function ProScreen() {
                 </Text>
               </Pressable>
 
-              <Pressable
-                onPress={() => void handleRevenueCatPaywall()}
-                style={({ pressed }) => [
-                  styles.secondaryBtn,
-                  { borderColor: tokens.border, minHeight: MIN_TOUCH_TARGET },
-                  pressed && { opacity: 0.75 },
-                ]}
-              >
-                <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
-                  View all plans
-                </Text>
-              </Pressable>
             </>
           ) : (
             <Pressable
