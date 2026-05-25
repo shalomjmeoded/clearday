@@ -44,6 +44,32 @@ export interface SubscriptionService {
 let configured = false;
 let customerInfoListenerAttached = false;
 
+function configureRevenueCatLogging(): void {
+  if (!__DEV__) return;
+
+  Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
+  Purchases.setLogHandler((level, message) => {
+    const formatted = `[RevenueCat] ${message}`;
+
+    if (message.includes('Purchase was cancelled')) {
+      console.debug(formatted);
+      return;
+    }
+
+    if (level === Purchases.LOG_LEVEL.DEBUG) {
+      console.debug(formatted);
+    } else if (level === Purchases.LOG_LEVEL.INFO) {
+      console.info(formatted);
+    } else if (level === Purchases.LOG_LEVEL.WARN) {
+      console.warn(formatted);
+    } else if (level === Purchases.LOG_LEVEL.ERROR) {
+      console.error(formatted);
+    } else {
+      console.log(formatted);
+    }
+  });
+}
+
 function mapCustomerInfoToEntitlement(info: CustomerInfo | null): ProEntitlement {
   // RevenueCat is the source of truth: when this entitlement is present in
   // CustomerInfo.entitlements.active, the user gets Pro feature unlocks. When
@@ -143,9 +169,7 @@ class RevenueCatSubscriptionService implements SubscriptionService {
     if (!apiKey) return;
 
     try {
-      if (__DEV__) {
-        Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
-      }
+      configureRevenueCatLogging();
 
       Purchases.configure({ apiKey });
       configured = true;
