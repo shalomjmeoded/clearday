@@ -14,16 +14,16 @@ export function usePressHoldFeedback() {
   const active = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(active.value, [0, 1], [1, SCALE_HELD]) }],
-    opacity: interpolate(active.value, [0, 1], [1, OPACITY_HELD]),
+    transform: [{ scale: interpolate(active.get(), [0, 1], [1, SCALE_HELD]) }],
+    opacity: interpolate(active.get(), [0, 1], [1, OPACITY_HELD]),
   }));
 
   const pressIn = () => {
-    active.value = withTiming(1, { duration: HOLD_IN_MS });
+    active.set(withTiming(1, { duration: HOLD_IN_MS }));
   };
 
   const pressOut = () => {
-    active.value = withTiming(0, { duration: HOLD_OUT_MS });
+    active.set(withTiming(0, { duration: HOLD_OUT_MS }));
   };
 
   return { animatedStyle, pressIn, pressOut };

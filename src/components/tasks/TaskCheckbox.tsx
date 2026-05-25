@@ -26,13 +26,13 @@ export function TaskCheckbox({ checked, priority, onPress }: Props) {
   const progress = useSharedValue(checked ? 1 : 0);
 
   useEffect(() => {
-    progress.value = withTiming(checked ? 1 : 0, { duration: 200 });
+    progress.set(withTiming(checked ? 1 : 0, { duration: 200 }));
   }, [checked, progress]);
 
   const boxStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
+    transform: [{ scale: scale.get() }],
     borderColor:
-      progress.value > 0.5
+      progress.get() > 0.5
         ? tokens.checkboxFill
         : priority === 'important' || priority === 'must_do_today'
           ? tokens.accent
@@ -40,18 +40,18 @@ export function TaskCheckbox({ checked, priority, onPress }: Props) {
   }));
 
   const fillStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
+    opacity: progress.get(),
   }));
 
   const checkStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{ scale: interpolate(progress.value, [0, 1], [0.5, 1]) }],
+    opacity: progress.get(),
+    transform: [{ scale: interpolate(progress.get(), [0, 1], [0.5, 1]) }],
   }));
 
   const handlePress = () => {
-    scale.value = withSpring(0.88, SPRING, () => {
-      scale.value = withSpring(1, SPRING);
-    });
+    scale.set(withSpring(0.88, SPRING, () => {
+      scale.set(withSpring(1, SPRING));
+    }));
     onPress();
   };
 

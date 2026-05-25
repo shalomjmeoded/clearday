@@ -35,26 +35,26 @@ function FilterChip({ label, color, active, tokens, onPress }: ChipProps) {
   const progress = useSharedValue(active ? 1 : 0);
 
   useEffect(() => {
-    progress.value = withTiming(active ? 1 : 0, { duration: 220 });
+    progress.set(withTiming(active ? 1 : 0, { duration: 220 }));
   }, [active, progress]);
 
   const chipStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
-      progress.value,
+      progress.get(),
       [0, 1],
       [tokens.sectionBg, tokens.accentSoft]
     ),
     borderColor: interpolateColor(
-      progress.value,
+      progress.get(),
       [0, 1],
       [tokens.border, tokens.accent]
     ),
-    transform: [{ scale: interpolate(progress.value, [0, 1], [1, 1.02]) }],
+    transform: [{ scale: interpolate(progress.get(), [0, 1], [1, 1.02]) }],
   }));
 
   const textStyle = useAnimatedStyle(() => ({
     color: interpolateColor(
-      progress.value,
+      progress.get(),
       [0, 1],
       [tokens.mutedText, tokens.accent]
     ),

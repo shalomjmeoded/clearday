@@ -13,7 +13,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
+import { RectButton, Swipeable } from 'react-native-gesture-handler';
 
 import { usePressHoldFeedback } from '@/hooks/usePressHoldFeedback';
 import { radius, spacing } from '@/theme/spacing';
@@ -23,6 +23,7 @@ import type { Task } from '@/types/task';
 import { formatTime } from '@/utils/dates';
 import { formatTaskSideDate } from '@/utils/formatTaskSideDate';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
+import { triggerSoftHaptic } from '@/utils/haptics';
 
 const SWIPE_ACTIVE_OFFSET_X: [number, number] = [-10, 10];
 const SWIPE_FAIL_OFFSET_Y: [number, number] = [-20, 20];
@@ -68,19 +69,35 @@ function TaskRowInner({
   const progress = useSharedValue(completed ? 1 : 0);
   const { animatedStyle: holdStyle, pressIn, pressOut } = usePressHoldFeedback();
   const isMust = task.priority === 'must_do_today' && !completed;
+  const isImportant = task.priority === 'important' && !completed;
   const sideDate = formatTaskSideDate(task.dueDate);
   const dragEnabled = Boolean(onDragActivate) && !completed;
-  const showPin = task.priority === 'important' || task.priority === 'must_do_today';
+  const showPriorityMarker =
+    task.priority === 'important' || task.priority === 'must_do_today';
 
   const openTask = useCallback(() => {
     if (isDragging) return;
     void onPress();
   }, [isDragging, onPress]);
 
+  const handlePressIn = useCallback(() => {
+    if (isDragging) return;
+    pressIn();
+  }, [isDragging, pressIn]);
+
+  const handlePressOut = useCallback(() => {
+    pressOut();
+  }, [pressOut]);
+
+  const handleDragActivate = useCallback(async () => {
+    if (!dragEnabled || !onDragActivate || isDragging) return;
+    await triggerSoftHaptic();
+    onDragActivate();
+  }, [dragEnabled, isDragging, onDragActivate]);
+
   const handleContentPress = useCallback(() => {
     if (isDragging) return;
 
-    pressIn();
     const now = Date.now();
 
     if (now - lastContentTapAt.current < 260) {
@@ -90,7 +107,6 @@ function TaskRowInner({
       }
       lastContentTapAt.current = 0;
       onComplete();
-      pressOut();
       return;
     }
 
@@ -104,9 +120,8 @@ function TaskRowInner({
         lastContentTapAt.current = 0;
         openTask();
       }
-      pressOut();
     }, 260);
-  }, [isDragging, onComplete, openTask, pressIn, pressOut]);
+  }, [isDragging, onComplete, openTask]);
 
   useEffect(
     () => () => {
@@ -122,53 +137,53 @@ function TaskRowInner({
   };
 
   useEffect(() => {
-    progress.value = withTiming(completed ? 1 : 0, { duration: 240 });
+    progress.set(withTiming(completed ? 1 : 0, { duration: 240 }));
   }, [completed, progress]);
 
   const titleStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0, 1], [1, 0.45]),
+    opacity: interpolate(progress.get(), [0, 1], [1, 0.45]),
   }));
 
-  const runAction = (action: () => void) => {
-    swipeRef.current?.close();
+  const runAction = useCallback((action: () => void) => {
     action();
-  };
+    requestAnimationFrame(() => swipeRef.current?.close());
+  }, []);
 
   const renderLeft = () => (
     <View style={styles.actionRail}>
-      <Pressable
+      <RectButton
         accessibilityRole="button"
         accessibilityLabel="Delete task"
         style={[styles.iconAction, { backgroundColor: tokens.danger }]}
         onPress={() => runAction(onDelete)}
       >
         <Ionicons name="trash-outline" size={16} color="#fff" />
-      </Pressable>
-      <Pressable
+      </RectButton>
+      <RectButton
         accessibilityRole="button"
         accessibilityLabel="Edit task"
         style={[styles.iconAction, { backgroundColor: tokens.actionEdit }]}
         onPress={() => runAction(onPress)}
       >
         <Ionicons name="create-outline" size={16} color="#fff" />
-      </Pressable>
-      <Pressable
+      </RectButton>
+      <RectButton
         accessibilityRole="button"
         accessibilityLabel="Archive task"
         style={[styles.iconAction, { backgroundColor: tokens.swipeArchive }]}
         onPress={() => runAction(onArchive)}
       >
         <Ionicons name="archive-outline" size={16} color="#fff" />
-      </Pressable>
+      </RectButton>
     </View>
   );
 
   const renderRight = () => (
     <View style={styles.actionRail}>
-      <Pressable
+      <RectButton
         accessibilityRole="button"
         accessibilityLabel={
-          task.priority === 'important' ? 'Remove important' : 'Mark important'
+          task.priority === 'important' ? 'Unstar task' : 'Star task'
         }
         style={[styles.iconAction, { backgroundColor: tokens.actionPin }]}
         onPress={() => runAction(onPin)}
@@ -178,8 +193,11 @@ function TaskRowInner({
           size={16}
           color="#fff"
         />
-      </Pressable>
-      <Pressable
+        <Text style={styles.actionLabel}>
+          {task.priority === 'important' ? 'Unstar' : 'Star'}
+        </Text>
+      </RectButton>
+      <RectButton
         accessibilityRole="button"
         accessibilityLabel={
           isRecurring(task.recurrence) ? 'Stop repeating' : 'Repeat task'
@@ -192,8 +210,11 @@ function TaskRowInner({
           size={16}
           color="#fff"
         />
-      </Pressable>
-      <Pressable
+        <Text style={styles.actionLabel}>
+          {isRecurring(task.recurrence) ? 'Stop' : 'Repeat'}
+        </Text>
+      </RectButton>
+      <RectButton
         accessibilityRole="button"
         accessibilityLabel={completed ? 'Mark as to-do' : 'Mark done'}
         style={[styles.iconAction, { backgroundColor: tokens.actionRead }]}
@@ -204,14 +225,17 @@ function TaskRowInner({
           size={16}
           color="#fff"
         />
-      </Pressable>
+        <Text style={styles.actionLabel}>{completed ? 'Todo' : 'Done'}</Text>
+      </RectButton>
     </View>
   );
 
   const content = (
     <Pressable
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       onPress={handleContentPress}
-      onLongPress={dragEnabled ? onDragActivate : undefined}
+      onLongPress={dragEnabled ? handleDragActivate : undefined}
       delayLongPress={200}
       disabled={isDragging}
       style={styles.content}
@@ -274,9 +298,10 @@ function TaskRowInner({
         !isDragging && holdStyle,
         {
           backgroundColor: isMust ? tokens.card : tokens.background,
-          borderColor: tokens.paperLine,
+          borderColor: isImportant ? tokens.actionPin : tokens.paperLine,
         },
         isMust && styles.mustRow,
+        isImportant && { backgroundColor: tokens.card },
       ]}
     >
       {isMust ? (
@@ -299,15 +324,21 @@ function TaskRowInner({
         {completed ? (
           <View style={[styles.doneMarker, { backgroundColor: tokens.actionRead }]} />
         ) : null}
-        {showPin ? (
+        {showPriorityMarker ? (
           <Pressable
             onPress={onPin}
             hitSlop={10}
             style={styles.pinButton}
             accessibilityRole="button"
-            accessibilityLabel="Unpin task"
+            accessibilityLabel={
+              task.priority === 'important' ? 'Unstar task' : 'Clear priority'
+            }
           >
-            <Ionicons name="pin" size={14} color={tokens.actionPin} />
+            <Ionicons
+              name={task.priority === 'important' ? 'star' : 'alert-circle'}
+              size={14}
+              color={tokens.actionPin}
+            />
           </Pressable>
         ) : null}
       </View>
@@ -437,7 +468,15 @@ const styles = StyleSheet.create({
   iconAction: {
     justifyContent: 'center',
     alignItems: 'center',
-    width: 42,
+    width: 56,
     marginRight: StyleSheet.hairlineWidth,
+    gap: 2,
+    paddingHorizontal: 4,
+  },
+  actionLabel: {
+    color: '#fff',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '700',
   },
 });

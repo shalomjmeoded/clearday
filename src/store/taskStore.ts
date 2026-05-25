@@ -43,6 +43,18 @@ function patchTaskInState(
   }));
 }
 
+function findTaskInState(state: TaskState, id: string): Task | undefined {
+  return [
+    ...state.todayTasks,
+    ...state.tomorrowTasks,
+    ...state.laterTasks,
+    ...state.listTasks,
+    ...state.todayCompletedTasks,
+    ...state.tomorrowCompletedTasks,
+    ...state.doneTasks,
+  ].find((task) => task.id === id);
+}
+
 export type TaskView = 'today' | 'tomorrow' | 'later' | 'done' | 'list';
 
 interface TaskState {
@@ -263,7 +275,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   setImportant: async (id) => {
-    const existing = await taskRepository.getById(id);
+    const existing = findTaskInState(get(), id) ?? (await taskRepository.getById(id));
     if (!existing) return;
     const nextPriority = existing.priority === 'important' ? 'normal' : 'important';
     patchTaskInState(set, id, { priority: nextPriority });

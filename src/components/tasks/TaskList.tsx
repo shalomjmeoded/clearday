@@ -10,7 +10,7 @@ import { spacing } from '@/theme/spacing';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
-import { mergeTasksPreservingOrder } from '@/utils/taskSyncKey';
+import { mergeTasksPreservingOrder, taskSyncKey } from '@/utils/taskSyncKey';
 
 import { CompletedSection } from './CompletedSection';
 import { TaskRow } from './TaskRow';
@@ -53,6 +53,10 @@ interface Props {
 
 function taskIds(tasks: Task[]): string {
   return tasks.map((task) => task.id).join(',');
+}
+
+function taskContentKeys(tasks: Task[]): string {
+  return tasks.map(taskSyncKey).join('|');
 }
 
 export function TaskList({
@@ -118,14 +122,14 @@ export function TaskList({
     if (reorderMode) {
       setOrderedTasks((current) => {
         const merged = mergeTasksPreservingOrder(current, activeTasks);
-        if (taskIds(current) === taskIds(merged)) {
+        if (taskContentKeys(current) === taskContentKeys(merged)) {
           return current;
         }
         return merged;
       });
       setManualSortTasks((current) => {
         const merged = mergeTasksPreservingOrder(current, activeTasks);
-        if (taskIds(current) === taskIds(merged)) {
+        if (taskContentKeys(current) === taskContentKeys(merged)) {
           return current;
         }
         return merged;
@@ -134,7 +138,7 @@ export function TaskList({
     }
     setOrderedTasks((current) => {
       const merged = mergeTasksPreservingOrder(current, activeTasks);
-      if (taskIds(current) === taskIds(merged)) {
+      if (taskContentKeys(current) === taskContentKeys(merged)) {
         return current;
       }
       return merged;

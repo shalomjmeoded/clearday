@@ -43,11 +43,11 @@ export function CompletedSection({
   const rotation = useSharedValue(0);
 
   useEffect(() => {
-    rotation.value = withTiming(expanded ? 1 : 0, { duration: 160 });
+    rotation.set(withTiming(expanded ? 1 : 0, { duration: 160 }));
   }, [expanded, rotation]);
 
   const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value * 90}deg` }],
+    transform: [{ rotate: `${rotation.get() * 90}deg` }],
   }));
 
   if (tasks.length === 0) return null;
