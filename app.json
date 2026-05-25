@@ -71,6 +71,18 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "headers": {
+          "Cross-Origin-Embedder-Policy": "credentialless",
+          "Cross-Origin-Opener-Policy": "same-origin"
+        }
+      },
+      "eas": {
+        "projectId": "02d2441b-142a-42d0-8dfd-0bb4763c99b8"
+      }
+    },
+    "owner": "ren10120"
   }
 }
