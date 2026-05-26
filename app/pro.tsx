@@ -37,6 +37,7 @@ const FALLBACK_PLANS = [
 const STANDARD_APPLE_EULA_URL =
   'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
+const CUSTOMER_CENTER_OPEN_TIMEOUT_MS = 1200;
 
 // Replace this with your public privacy policy URL before App Store submission.
 const PRIVACY_POLICY_URL = '';
@@ -91,23 +92,18 @@ export default function ProScreen() {
 
   const handleCustomerCenter = useCallback(async () => {
     await triggerSelectionHaptic();
+    console.info('[Subscriptions] Manage subscription pressed.');
 
-    const openedCustomerCenter = await presentCustomerCenter();
+    const openedCustomerCenter = await Promise.race([
+      presentCustomerCenter(),
+      new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(false), CUSTOMER_CENTER_OPEN_TIMEOUT_MS);
+      }),
+    ]);
     if (openedCustomerCenter) return;
 
     try {
-      const canOpenSubscriptions = await Linking.canOpenURL(APPLE_SUBSCRIPTIONS_URL);
-      if (!canOpenSubscriptions) {
-        console.warn(
-          `[Subscriptions] Cannot open Apple subscription management URL: ${APPLE_SUBSCRIPTIONS_URL}`
-        );
-        Alert.alert(
-          'Manage Subscription',
-          'Open App Store account settings to manage your subscription.'
-        );
-        return;
-      }
-
+      console.info('[Subscriptions] Opening Apple subscription management.');
       await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
     } catch (error) {
       console.warn('[Subscriptions] Failed to open Apple subscription management:', error);
