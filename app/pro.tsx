@@ -36,6 +36,7 @@ const FALLBACK_PLANS = [
 
 const STANDARD_APPLE_EULA_URL =
   'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
 // Replace this with your public privacy policy URL before App Store submission.
 const PRIVACY_POLICY_URL = '';
@@ -47,11 +48,9 @@ export default function ProScreen() {
   const purchasing = useProStore((s) => s.purchasing);
   const offerings = useProStore((s) => s.offerings);
   const error = useProStore((s) => s.error);
-  const mockProEnabled = useProStore((s) => s.mockProEnabled);
   const loadOfferings = useProStore((s) => s.loadOfferings);
   const purchase = useProStore((s) => s.purchase);
   const restorePurchases = useProStore((s) => s.restorePurchases);
-  const setMockProForDevOnly = useProStore((s) => s.setMockProForDevOnly);
 
   const [selectedProductId, setSelectedProductId] = useState<string>(
     PRODUCT_IDS.yearly
@@ -92,7 +91,31 @@ export default function ProScreen() {
 
   const handleCustomerCenter = useCallback(async () => {
     await triggerSelectionHaptic();
-    await presentCustomerCenter();
+
+    const openedCustomerCenter = await presentCustomerCenter();
+    if (openedCustomerCenter) return;
+
+    try {
+      const canOpenSubscriptions = await Linking.canOpenURL(APPLE_SUBSCRIPTIONS_URL);
+      if (!canOpenSubscriptions) {
+        console.warn(
+          `[Subscriptions] Cannot open Apple subscription management URL: ${APPLE_SUBSCRIPTIONS_URL}`
+        );
+        Alert.alert(
+          'Manage Subscription',
+          'Open App Store account settings to manage your subscription.'
+        );
+        return;
+      }
+
+      await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
+    } catch (error) {
+      console.warn('[Subscriptions] Failed to open Apple subscription management:', error);
+      Alert.alert(
+        'Manage Subscription',
+        'Could not open subscription management. You can manage subscriptions from the App Store account settings.'
+      );
+    }
   }, []);
 
   const openTerms = useCallback(async () => {
@@ -113,11 +136,6 @@ export default function ProScreen() {
 
     await Linking.openURL(PRIVACY_POLICY_URL);
   }, []);
-
-  const toggleMockPro = useCallback(async () => {
-    await triggerSelectionHaptic();
-    setMockProForDevOnly(!mockProEnabled);
-  }, [mockProEnabled, setMockProForDevOnly]);
 
   return (
     <>
@@ -314,34 +332,6 @@ export default function ProScreen() {
               </View>
             </View>
           ) : null}
-
-          {__DEV__ ? (
-            <View style={[styles.devBox, { borderColor: tokens.border }]}>
-              <Text style={[typography.caption, { color: tokens.mutedText }]}>
-                DEVELOPER
-              </Text>
-              <Pressable
-                onPress={() => void toggleMockPro()}
-                style={({ pressed }) => [
-                  styles.devToggle,
-                  {
-                    backgroundColor: tokens.sectionBg,
-                    minHeight: MIN_TOUCH_TARGET,
-                    borderColor: mockProEnabled ? tokens.accent : tokens.border,
-                    borderWidth: mockProEnabled ? 1.5 : StyleSheet.hairlineWidth,
-                  },
-                  pressed && { opacity: 0.8 },
-                ]}
-              >
-                <Text style={[typography.body, { color: tokens.text }]}>
-                  Mock Pro enabled: {mockProEnabled ? 'On' : 'Off'}
-                </Text>
-              </Pressable>
-              <Text style={[typography.meta, styles.devHint, { color: tokens.mutedText }]}>
-                Dev-only override when RevenueCat keys or store products are not ready.
-              </Text>
-            </View>
-          ) : null}
         </ScrollView>
       </SafeAreaView>
     </>
@@ -442,22 +432,5 @@ const styles = StyleSheet.create({
   },
   legalLinkText: {
     fontSize: 15,
-  },
-  devBox: {
-    paddingTop: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
-  devToggle: {
-    justifyContent: 'center',
-    borderRadius: radius.md,
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  devHint: {
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: spacing.sm,
   },
 });

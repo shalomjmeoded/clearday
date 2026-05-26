@@ -9,22 +9,12 @@ interface ProState {
   offerings: ProPackage[];
   error: string | null;
   lastUpdatedAt: string | null;
-  mockProEnabled: boolean;
   purchasing: boolean;
   initializePurchases: () => Promise<void>;
   refreshProStatus: () => Promise<void>;
   loadOfferings: () => Promise<void>;
   purchase: (productId: string) => Promise<void>;
   restorePurchases: () => Promise<{ restored: boolean; message: string }>;
-  setMockProForDevOnly: (value: boolean) => void;
-}
-
-function resolveIsPro(
-  mockProEnabled: boolean,
-  entitlement: ProEntitlement
-): boolean {
-  if (__DEV__ && mockProEnabled) return true;
-  return entitlement.isPro;
 }
 
 export const useProStore = create<ProState>((set, get) => ({
@@ -33,7 +23,6 @@ export const useProStore = create<ProState>((set, get) => ({
   offerings: [],
   error: null,
   lastUpdatedAt: null,
-  mockProEnabled: false,
   purchasing: false,
 
   initializePurchases: async () => {
@@ -52,18 +41,14 @@ export const useProStore = create<ProState>((set, get) => ({
 
   refreshProStatus: async () => {
     try {
-      const entitlement = await revenueCatSubscriptionService.getProStatus(
-        get().mockProEnabled
-      );
+      const entitlement = await revenueCatSubscriptionService.getProStatus();
 
       set({
-        isPro: resolveIsPro(get().mockProEnabled, entitlement),
+        isPro: entitlement.isPro,
         lastUpdatedAt: new Date().toISOString(),
       });
     } catch {
-      if (__DEV__ && get().mockProEnabled) {
-        set({ isPro: true, lastUpdatedAt: new Date().toISOString() });
-      }
+      set({ isPro: false, lastUpdatedAt: new Date().toISOString() });
     }
   },
 
@@ -95,7 +80,7 @@ export const useProStore = create<ProState>((set, get) => ({
       const entitlement = await revenueCatSubscriptionService.purchase(productId);
 
       set({
-        isPro: resolveIsPro(get().mockProEnabled, entitlement),
+        isPro: entitlement.isPro,
         lastUpdatedAt: new Date().toISOString(),
         purchasing: false,
         error: null,
@@ -131,7 +116,7 @@ export const useProStore = create<ProState>((set, get) => ({
 
     try {
       const entitlement = await revenueCatSubscriptionService.restorePurchases();
-      const restored = resolveIsPro(get().mockProEnabled, entitlement);
+      const restored = entitlement.isPro;
 
       set({
         isPro: restored,
@@ -163,13 +148,6 @@ export const useProStore = create<ProState>((set, get) => ({
       set({ error: message });
       return { restored: false, message };
     }
-  },
-
-  setMockProForDevOnly: (value) => {
-    if (!__DEV__) return;
-
-    set({ mockProEnabled: value });
-    void get().refreshProStatus();
   },
 }));
 

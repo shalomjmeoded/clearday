@@ -19,7 +19,7 @@ import {
 
 export type ProEntitlement = {
   isPro: boolean;
-  source: 'revenuecat' | 'mock' | 'unknown';
+  source: 'revenuecat' | 'unknown';
   expiresAt?: string | null;
 };
 
@@ -35,7 +35,7 @@ export type ProPackage = {
 
 export interface SubscriptionService {
   configure(): Promise<void>;
-  getProStatus(mockPro?: boolean): Promise<ProEntitlement>;
+  getProStatus(): Promise<ProEntitlement>;
   getOfferings(): Promise<ProPackage[]>;
   purchase(productId: string): Promise<ProEntitlement>;
   restorePurchases(): Promise<ProEntitlement>;
@@ -89,17 +89,6 @@ function mapCustomerInfoToEntitlement(info: CustomerInfo | null): ProEntitlement
     source: 'revenuecat',
     expiresAt: active.expirationDate ?? null,
   };
-}
-
-function mergeWithMock(
-  entitlement: ProEntitlement,
-  mockPro: boolean
-): ProEntitlement {
-  if (!__DEV__ || !mockPro) return entitlement;
-
-  if (entitlement.isPro) return entitlement;
-
-  return { isPro: true, source: 'mock', expiresAt: null };
 }
 
 function isUserCancelled(error: unknown): boolean {
@@ -187,23 +176,17 @@ class RevenueCatSubscriptionService implements SubscriptionService {
     }
   }
 
-  async getProStatus(mockPro = false): Promise<ProEntitlement> {
+  async getProStatus(): Promise<ProEntitlement> {
     if (!configured) {
-      return mergeWithMock(
-        { isPro: false, source: 'unknown' },
-        mockPro
-      );
+      return { isPro: false, source: 'unknown' };
     }
 
     try {
       const info = await Purchases.getCustomerInfo();
-      return mergeWithMock(mapCustomerInfoToEntitlement(info), mockPro);
+      return mapCustomerInfoToEntitlement(info);
     } catch (error) {
       console.warn('[RevenueCat] getProStatus failed:', error);
-      return mergeWithMock(
-        { isPro: false, source: 'unknown' },
-        mockPro
-      );
+      return { isPro: false, source: 'unknown' };
     }
   }
 
