@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
@@ -33,6 +33,12 @@ const FALLBACK_PLANS = [
     featured: true,
   },
 ] as const;
+
+const STANDARD_APPLE_EULA_URL =
+  'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+
+// Replace this with your public privacy policy URL before App Store submission.
+const PRIVACY_POLICY_URL = '';
 
 export default function ProScreen() {
   const { tokens } = useTheme();
@@ -87,6 +93,25 @@ export default function ProScreen() {
   const handleCustomerCenter = useCallback(async () => {
     await triggerSelectionHaptic();
     await presentCustomerCenter();
+  }, []);
+
+  const openTerms = useCallback(async () => {
+    await triggerSelectionHaptic();
+    await Linking.openURL(STANDARD_APPLE_EULA_URL);
+  }, []);
+
+  const openPrivacyPolicy = useCallback(async () => {
+    await triggerSelectionHaptic();
+
+    if (!PRIVACY_POLICY_URL) {
+      Alert.alert(
+        'Privacy Policy',
+        'Add your public privacy policy URL before submitting this app to App Store review.'
+      );
+      return;
+    }
+
+    await Linking.openURL(PRIVACY_POLICY_URL);
   }, []);
 
   const toggleMockPro = useCallback(async () => {
@@ -261,6 +286,35 @@ export default function ProScreen() {
             {PRO_PRIVACY_NOTE}
           </Text>
 
+          {!isPro ? (
+            <View style={styles.subscriptionDisclosure}>
+              <Text style={[typography.meta, styles.disclosureText, { color: tokens.mutedText }]}>
+                Subscriptions renew automatically unless canceled at least 24 hours before
+                the end of the current period. Payment is charged to your Apple ID at
+                confirmation of purchase. You can manage or cancel your subscription in
+                App Store account settings.
+              </Text>
+              <View style={styles.legalLinks}>
+                <Pressable
+                  onPress={() => void openTerms()}
+                  style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={[typography.button, styles.legalLinkText, { color: tokens.accent }]}>
+                    Terms
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void openPrivacyPolicy()}
+                  style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={[typography.button, styles.legalLinkText, { color: tokens.accent }]}>
+                    Privacy Policy
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
           {__DEV__ ? (
             <View style={[styles.devBox, { borderColor: tokens.border }]}>
               <Text style={[typography.caption, { color: tokens.mutedText }]}>
@@ -362,10 +416,32 @@ const styles = StyleSheet.create({
   featureItem: { lineHeight: 22 },
   privacyFooter: {
     lineHeight: 20,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.md,
     textTransform: 'none',
     letterSpacing: 0,
     fontWeight: '400',
+  },
+  subscriptionDisclosure: {
+    gap: spacing.sm,
+    marginBottom: spacing.xl,
+  },
+  disclosureText: {
+    lineHeight: 20,
+    textTransform: 'none',
+    letterSpacing: 0,
+    fontWeight: '400',
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  legalLink: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+  },
+  legalLinkText: {
+    fontSize: 15,
   },
   devBox: {
     paddingTop: spacing.lg,
