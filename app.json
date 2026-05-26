@@ -80,7 +80,8 @@
           "icon": "./assets/images/icon.png",
           "color": "#C8755D"
         }
-      ]
+      ],
+      "./plugins/withAndroidNamespace.js"
     ],
     "experiments": {
       "typedRoutes": true
