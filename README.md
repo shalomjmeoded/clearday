@@ -18,9 +18,9 @@ Press `i` for iOS simulator or `a` for Android emulator. Use Expo Go on a physic
 - **Local SQLite** — `clearday.db` on device; source of truth for tasks, lists, reminders, settings
 - **No account, no backend, no cloud sync** — works fully offline
 - **First launch** — creates tables, seeds Inbox + default settings, then loads UI (no empty flash on Today)
-- **Pro (mock)** — `settings.isPro` in SQLite; toggle on Pro screen for testing
+- **Pro** — RevenueCat-backed subscriptions unlock Pro features
 - **Backup** — Export / Import `.clearday` JSON files (Settings → Backup & Restore); manual transfer between devices
-- **Phase 2 (planned)** — RevenueCat subscriptions, automatic cloud sync
+- **Phase 2 (planned)** — automatic cloud sync
 
 Tables: `tasks`, `lists`, `reminders`, `settings`
 
@@ -47,23 +47,18 @@ Default settings: system theme, haptics on, completed tasks collapsed, reminder 
 | `BottomInputBar` | Keyboard-sticky add field |
 | `useScreenInsets` | Shared inset math (notch, tab bar, home indicator) |
 
-## Free vs Pro (mock)
+## Free vs Pro
 
 **Free:** Today, All, Tomorrow/Later, focus, basic reminders, inbox + one custom list, themes, local storage, finished tasks, 0 ads.
 
-**Pro (mock):** Unlimited lists and Pro-gated features. Paywall lists planned benefits; toggle **Mock Pro enabled** on the Pro screen (persists in SQLite).
-
-Open **More → Do! Pro** → **Mock Pro enabled** (persists in SQLite).
-
-**Restore purchases** shows a placeholder until RevenueCat is integrated.
-
-## Subscriptions (future)
-
-`src/features/pro/subscriptionService.ts` defines `SubscriptionProvider` for swapping mock → RevenueCat later.
+**Pro:** Unlimited custom lists, recurring tasks, and Pro-gated features. Purchases, restore, and subscription status are handled with RevenueCat.
 
 ## Privacy copy
 
-Shared strings in `src/constants/privacyCopy.ts`. Store listing draft: `docs/app-store-listing.md`.
+Shared strings in `src/constants/privacyCopy.ts`. Store listing draft:
+`docs/app-store-listing.md`. iOS submission metadata:
+`docs/app-store-submission.md`. Public privacy policy source:
+`docs/privacy.html`.
 
 Main line: *Your tasks stay on your phone. We do not upload, read, sell, or share your task data.*
 

@@ -5,7 +5,9 @@ Use this before each iOS submission. Last checked against Apple guidance on
 
 ## App Store Connect
 
-- Add a public privacy policy URL for Do!.
+- Use the public privacy policy URL:
+  `https://shalomjmeoded.github.io/clearday/privacy.html`.
+- Enable GitHub Pages from the repository `docs/` folder before submission.
 - In App Privacy, disclose RevenueCat purchase collection. RevenueCat says apps
   using the SDK must disclose Purchases information.
 - Keep tracking set to No unless an advertising/attribution SDK is added.
@@ -20,6 +22,7 @@ Use this before each iOS submission. Last checked against Apple guidance on
   - Task data is stored locally on device.
   - Pro purchase is handled with RevenueCat and Apple in-app purchase.
   - No demo account is needed because the app has no login.
+- Copy App Store metadata and review notes from `docs/app-store-submission.md`.
 
 ## In-App Requirements
 

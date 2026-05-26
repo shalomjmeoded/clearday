@@ -39,8 +39,7 @@ const STANDARD_APPLE_EULA_URL =
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const CUSTOMER_CENTER_OPEN_TIMEOUT_MS = 1200;
 
-// Replace this with your public privacy policy URL before App Store submission.
-const PRIVACY_POLICY_URL = '';
+const PRIVACY_POLICY_URL = 'https://shalomjmeoded.github.io/clearday/privacy.html';
 
 export default function ProScreen() {
   const { tokens } = useTheme();
@@ -129,15 +128,15 @@ export default function ProScreen() {
   const openPrivacyPolicy = useCallback(async () => {
     await triggerSelectionHaptic();
 
-    if (!PRIVACY_POLICY_URL) {
+    try {
+      await Linking.openURL(PRIVACY_POLICY_URL);
+    } catch (error) {
+      console.warn('[Privacy] Failed to open privacy policy:', error);
       Alert.alert(
         'Privacy Policy',
-        'Add your public privacy policy URL before submitting this app to App Store review.'
+        'Could not open the privacy policy. Please try again later.'
       );
-      return;
     }
-
-    await Linking.openURL(PRIVACY_POLICY_URL);
   }, []);
 
   return (

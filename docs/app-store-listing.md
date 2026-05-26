@@ -1,5 +1,8 @@
 # App Store / Play Store listing (draft)
 
+Canonical iOS submission metadata now lives in
+`docs/app-store-submission.md`.
+
 Use this privacy line in the store description and privacy policy summary:
 
 **Your tasks stay on your phone. We do not upload, read, sell, or share your task data.**
@@ -32,9 +35,9 @@ Your tasks are stored locally on this device. Export a backup before deleting th
 
 Today list, All list, Tomorrow/Later, Focus Mode, basic reminders, one custom list, light/dark/system theme, local storage, finished tasks, 0 ads, and private on-device task storage.
 
-**Pro (subscriptions coming)**
+**Pro**
 
-Everything in Free, plus unlimited lists, recurring tasks, advanced reminders, widgets, premium themes, custom app icons, backup/export, future cloud sync, shared lists, voice capture, smarter parsing, and completion insights.
+Everything in Free, plus unlimited custom lists and recurring tasks.
 
 Backup export/import is available to all users today. Cloud sync is not available yet — use Export on one device and Import on another.
 
@@ -48,5 +51,6 @@ todo, tasks, minimalist, private, local, offline, no ads, simple, focus, list
 
 - Confirm iOS bundle identifier (`com.do.simpletodo` in app.json)
 - Confirm Android package name (`com.do.simpletodo` in app.json)
+- Use public privacy policy URL: `https://shalomjmeoded.github.io/clearday/privacy.html`
 - Upload new Do! icon and splash screenshots from `assets/images/`
 - Set store listing subtitle to: Minimalist, private Todo list app
