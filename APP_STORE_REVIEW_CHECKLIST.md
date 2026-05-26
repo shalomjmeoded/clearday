@@ -23,6 +23,8 @@ Use this before each iOS submission. Last checked against Apple guidance on
   - Pro purchase is handled with RevenueCat and Apple in-app purchase.
   - No demo account is needed because the app has no login.
 - Copy App Store metadata and review notes from `docs/app-store-submission.md`.
+- Confirm production EAS env includes `EXPO_PUBLIC_REVENUECAT_API_KEY` or
+  `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` before every TestFlight build.
 
 ## In-App Requirements
 

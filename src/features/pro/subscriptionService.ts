@@ -45,6 +45,20 @@ export interface SubscriptionService {
 let configured = false;
 let customerInfoListenerAttached = false;
 
+export class PurchasesNotConfiguredError extends Error {
+  constructor() {
+    super('Purchases not configured');
+    this.name = 'PurchasesNotConfiguredError';
+  }
+}
+
+export class NoSubscriptionPackagesError extends Error {
+  constructor() {
+    super('No subscription packages available');
+    this.name = 'NoSubscriptionPackagesError';
+  }
+}
+
 function configureRevenueCatLogging(): void {
   if (!__DEV__) return;
 
@@ -194,18 +208,31 @@ class RevenueCatSubscriptionService implements SubscriptionService {
   }
 
   async getOfferings(): Promise<ProPackage[]> {
-    if (!configured) return [];
+    if (!configured) {
+      throw new PurchasesNotConfiguredError();
+    }
 
     try {
       const offerings = await Purchases.getOfferings();
       const packages = getSubscriptionPackages(offerings);
 
-      if (!packages.length) return [];
+      if (!packages.length) {
+        console.warn('[RevenueCat] No packages found for offering:', {
+          expectedOfferingId: REVENUECAT_OFFERING_ID,
+          offeringIds: Object.keys(offerings.all ?? {}),
+          currentOfferingId: offerings.current?.identifier ?? null,
+        });
+        throw new NoSubscriptionPackagesError();
+      }
 
       return packages.map(mapPackage);
     } catch (error) {
+      if (error instanceof NoSubscriptionPackagesError) {
+        throw error;
+      }
+
       console.warn('[RevenueCat] getOfferings failed:', error);
-      return [];
+      throw error;
     }
   }
 

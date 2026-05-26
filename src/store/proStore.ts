@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 
 import type { ProEntitlement, ProPackage } from '@/features/pro/subscriptionService';
-import { revenueCatSubscriptionService } from '@/features/pro/subscriptionService';
+import {
+  NoSubscriptionPackagesError,
+  PurchasesNotConfiguredError,
+  revenueCatSubscriptionService,
+} from '@/features/pro/subscriptionService';
 
 interface ProState {
   isPro: boolean;
@@ -70,7 +74,25 @@ export const useProStore = create<ProState>((set, get) => ({
         error:
           offerings.length === 0 ? 'Plans are unavailable right now.' : null,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof PurchasesNotConfiguredError) {
+        set({
+          offerings: [],
+          error:
+            'Subscriptions are not configured in this build. Add the RevenueCat public SDK key to EAS and rebuild.',
+        });
+        return;
+      }
+
+      if (error instanceof NoSubscriptionPackagesError) {
+        set({
+          offerings: [],
+          error:
+            'No subscription products are available yet. Check the RevenueCat offering and App Store product setup.',
+        });
+        return;
+      }
+
       set({
         offerings: [],
         error: 'Could not load plans. Try again.',
