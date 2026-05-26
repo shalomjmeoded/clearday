@@ -9,6 +9,7 @@ interface ProState {
   offerings: ProPackage[];
   error: string | null;
   lastUpdatedAt: string | null;
+  activeProductId: string | null;
   purchasing: boolean;
   initializePurchases: () => Promise<void>;
   refreshProStatus: () => Promise<void>;
@@ -23,6 +24,7 @@ export const useProStore = create<ProState>((set, get) => ({
   offerings: [],
   error: null,
   lastUpdatedAt: null,
+  activeProductId: null,
   purchasing: false,
 
   initializePurchases: async () => {
@@ -45,10 +47,15 @@ export const useProStore = create<ProState>((set, get) => ({
 
       set({
         isPro: entitlement.isPro,
+        activeProductId: entitlement.productId ?? null,
         lastUpdatedAt: new Date().toISOString(),
       });
     } catch {
-      set({ isPro: false, lastUpdatedAt: new Date().toISOString() });
+      set({
+        isPro: false,
+        activeProductId: null,
+        lastUpdatedAt: new Date().toISOString(),
+      });
     }
   },
 
@@ -81,6 +88,7 @@ export const useProStore = create<ProState>((set, get) => ({
 
       set({
         isPro: entitlement.isPro,
+        activeProductId: entitlement.productId ?? null,
         lastUpdatedAt: new Date().toISOString(),
         purchasing: false,
         error: null,
@@ -120,6 +128,7 @@ export const useProStore = create<ProState>((set, get) => ({
 
       set({
         isPro: restored,
+        activeProductId: entitlement.productId ?? null,
         loading: false,
         lastUpdatedAt: new Date().toISOString(),
       });

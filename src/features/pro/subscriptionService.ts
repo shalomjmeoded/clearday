@@ -20,6 +20,7 @@ import {
 export type ProEntitlement = {
   isPro: boolean;
   source: 'revenuecat' | 'unknown';
+  productId?: string | null;
   expiresAt?: string | null;
 };
 
@@ -80,6 +81,7 @@ function mapCustomerInfoToEntitlement(info: CustomerInfo | null): ProEntitlement
     return {
       isPro: false,
       source: 'revenuecat',
+      productId: null,
       expiresAt: null,
     };
   }
@@ -87,6 +89,7 @@ function mapCustomerInfoToEntitlement(info: CustomerInfo | null): ProEntitlement
   return {
     isPro: true,
     source: 'revenuecat',
+    productId: active.productIdentifier,
     expiresAt: active.expirationDate ?? null,
   };
 }
@@ -178,7 +181,7 @@ class RevenueCatSubscriptionService implements SubscriptionService {
 
   async getProStatus(): Promise<ProEntitlement> {
     if (!configured) {
-      return { isPro: false, source: 'unknown' };
+      return { isPro: false, source: 'unknown', productId: null };
     }
 
     try {
@@ -186,7 +189,7 @@ class RevenueCatSubscriptionService implements SubscriptionService {
       return mapCustomerInfoToEntitlement(info);
     } catch (error) {
       console.warn('[RevenueCat] getProStatus failed:', error);
-      return { isPro: false, source: 'unknown' };
+      return { isPro: false, source: 'unknown', productId: null };
     }
   }
 
@@ -241,7 +244,7 @@ class RevenueCatSubscriptionService implements SubscriptionService {
 
   async restorePurchases(): Promise<ProEntitlement> {
     if (!configured) {
-      return { isPro: false, source: 'unknown' };
+      return { isPro: false, source: 'unknown', productId: null };
     }
 
     try {

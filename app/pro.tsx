@@ -49,6 +49,7 @@ export default function ProScreen() {
   const purchasing = useProStore((s) => s.purchasing);
   const offerings = useProStore((s) => s.offerings);
   const error = useProStore((s) => s.error);
+  const activeProductId = useProStore((s) => s.activeProductId);
   const loadOfferings = useProStore((s) => s.loadOfferings);
   const purchase = useProStore((s) => s.purchase);
   const restorePurchases = useProStore((s) => s.restorePurchases);
@@ -60,6 +61,12 @@ export default function ProScreen() {
   useEffect(() => {
     void loadOfferings();
   }, [loadOfferings]);
+
+  useEffect(() => {
+    if (activeProductId) {
+      setSelectedProductId(activeProductId);
+    }
+  }, [activeProductId]);
 
   const plans =
     offerings.length > 0
@@ -181,7 +188,7 @@ export default function ProScreen() {
 
           <View style={styles.plans}>
             {plans.map((plan) => {
-              const selected = selectedProductId === plan.id;
+              const selected = (activeProductId ?? selectedProductId) === plan.id;
 
               return (
                 <Pressable
