@@ -22,13 +22,13 @@ const FALLBACK_PLANS = [
   {
     id: PRODUCT_IDS.monthly,
     label: 'Monthly',
-    price: 'Unavailable',
+    price: '$3.99',
     period: '/ month',
   },
   {
     id: PRODUCT_IDS.yearly,
     label: 'Yearly',
-    price: 'Unavailable',
+    price: '$19.99',
     period: '/ year',
     featured: true,
   },
@@ -39,7 +39,7 @@ const STANDARD_APPLE_EULA_URL =
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const CUSTOMER_CENTER_OPEN_TIMEOUT_MS = 1200;
 
-const PRIVACY_POLICY_URL = 'https://shalomjmeoded.github.io/clearday/privacy.html';
+const PRIVACY_POLICY_URL = 'https://clearday-seven.vercel.app/privacy';
 
 export default function ProScreen() {
   const { tokens } = useTheme();
@@ -209,7 +209,12 @@ export default function ProScreen() {
                   <Text style={[typography.body, { color: tokens.text, fontWeight: '600' }]}>
                     {plan.label}
                   </Text>
-                  <Text style={[typography.meta, { color: tokens.mutedText, marginTop: 2 }]}>
+                  <Text
+                    style={[
+                      typography.body,
+                      { color: tokens.text, fontWeight: '600', marginTop: 2 },
+                    ]}
+                  >
                     {plan.price}
                     {plan.period}
                   </Text>
@@ -309,22 +314,25 @@ export default function ProScreen() {
           {!isPro ? (
             <View style={styles.subscriptionDisclosure}>
               <Text style={[typography.meta, styles.disclosureText, { color: tokens.mutedText }]}>
-                Subscriptions renew automatically unless canceled at least 24 hours before
-                the end of the current period. Payment is charged to your Apple ID at
-                confirmation of purchase. You can manage or cancel your subscription in
-                App Store account settings.
+                Monthly Pro: $3.99/month{'\n'}
+                Yearly Pro: $19.99/year{'\n\n'}
+                Subscriptions automatically renew unless canceled at least 24 hours before
+                the end of the current billing period. Payment will be charged to the
+                user&apos;s Apple ID account at confirmation of purchase.
               </Text>
               <View style={styles.legalLinks}>
                 <Pressable
                   onPress={() => void openTerms()}
+                  accessibilityRole="link"
                   style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.7 }]}
                 >
                   <Text style={[typography.button, styles.legalLinkText, { color: tokens.accent }]}>
-                    Terms
+                    Terms of Use (EULA)
                   </Text>
                 </Pressable>
                 <Pressable
                   onPress={() => void openPrivacyPolicy()}
+                  accessibilityRole="link"
                   style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.7 }]}
                 >
                   <Text style={[typography.button, styles.legalLinkText, { color: tokens.accent }]}>
