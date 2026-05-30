@@ -1,8 +1,5 @@
 {
   "name": "do-privacy-policy",
   "private": true,
-  "version": "1.0.0",
-  "scripts": {
-    "build": "node -e \"console.log('Static privacy page ready')\""
-  }
+  "version": "1.0.0"
 }
