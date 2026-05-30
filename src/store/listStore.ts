@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 
 import { INBOX_LIST_ID } from '@/db/constants';
@@ -18,6 +19,11 @@ interface ListState {
 export const useListStore = create<ListState>((set) => ({
   lists: [],
   refresh: async () => {
+    if (Platform.OS === 'web') {
+      set({ lists: [] });
+      return;
+    }
+
     const lists = await listRepository.getAll();
     set({ lists });
   },

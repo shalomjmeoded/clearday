@@ -4,7 +4,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, StyleSheet, useColorScheme } from 'react-native';
+import { AppState, Platform, StyleSheet, useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 
 import { BootstrapScreen } from '@/components/layout/BootstrapScreen';
@@ -13,17 +13,12 @@ import {
   SPLASH_BACKGROUND_DARK,
   SPLASH_BACKGROUND_LIGHT,
 } from '@/constants/brandAssets';
-import { initDatabase } from '@/db/migrations';
-import { initReminders } from '@/features/reminders/reminderService';
 import {
   fullScreenModalOptions,
   modalScreenOptions,
   stackScreenOptions,
 } from '@/navigation/screenOptions';
-import { useListStore } from '@/store/listStore';
 import { useProStore } from '@/store/proStore';
-import { useSettingsStore } from '@/store/settingsStore';
-import { useTaskStore } from '@/store/taskStore';
 import { buildNavigationTheme } from '@/theme/navigationTheme';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 
@@ -73,6 +68,30 @@ export default function RootLayout() {
   useEffect(() => {
     async function bootstrap() {
       try {
+        const isWebPaywall =
+          Platform.OS === 'web' &&
+          typeof window !== 'undefined' &&
+          window.location.pathname.startsWith('/pro');
+
+        if (isWebPaywall) {
+          void useProStore.getState().initializePurchases();
+          return;
+        }
+
+        const [
+          { initDatabase },
+          { initReminders },
+          { useSettingsStore },
+          { useTaskStore },
+          { useListStore },
+        ] = await Promise.all([
+          import('@/db/migrations'),
+          import('@/features/reminders/reminderService'),
+          import('@/store/settingsStore'),
+          import('@/store/taskStore'),
+          import('@/store/listStore'),
+        ]);
+
         await initDatabase();
         await initReminders();
         await useSettingsStore.getState().hydrate();

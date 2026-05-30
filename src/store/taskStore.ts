@@ -1,4 +1,4 @@
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { create } from 'zustand';
 
@@ -116,6 +116,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   todayReady: false,
 
   refreshToday: async () => {
+    if (Platform.OS === 'web') {
+      set({ todayTasks: [], todayCompletedTasks: [], todayReady: true });
+      return;
+    }
+
     const [todayTasks, todayCompletedTasks] = await Promise.all([
       fetchTodayTasks(),
       fetchTodayCompletedTasks(),
@@ -124,6 +129,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   refreshTomorrow: async () => {
+    if (Platform.OS === 'web') {
+      set({ tomorrowTasks: [], tomorrowCompletedTasks: [] });
+      return;
+    }
+
     const [tomorrowTasks, tomorrowCompletedTasks] = await Promise.all([
       fetchTomorrowTasks(),
       fetchTomorrowCompletedTasks(),
@@ -132,16 +142,31 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   refreshLater: async () => {
+    if (Platform.OS === 'web') {
+      set({ laterTasks: [] });
+      return;
+    }
+
     const laterTasks = await fetchLaterTasks();
     set({ laterTasks });
   },
 
   refreshDone: async () => {
+    if (Platform.OS === 'web') {
+      set({ doneTasks: [] });
+      return;
+    }
+
     const doneTasks = await fetchDoneTasks();
     set({ doneTasks });
   },
 
   refreshList: async (listId: string) => {
+    if (Platform.OS === 'web') {
+      set({ listTasks: [] });
+      return;
+    }
+
     const listTasks = await taskRepository.getByListId(listId);
     set({ listTasks });
   },

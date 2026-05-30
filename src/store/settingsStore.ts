@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 
-import { loadSettings, updateSetting } from '@/features/settings/settingsRepository';
 import type { AppSettings } from '@/types/settings';
 import { DEFAULT_SETTINGS } from '@/types/settings';
 
@@ -18,10 +17,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   settings: DEFAULT_SETTINGS,
   loaded: false,
   hydrate: async () => {
+    const { loadSettings } = await import('@/features/settings/settingsRepository');
     const settings = await loadSettings();
     set({ settings, loaded: true });
   },
   setSetting: async (key, value) => {
+    const { updateSetting } = await import('@/features/settings/settingsRepository');
     const settings = await updateSetting(key, value);
     set({ settings });
   },
