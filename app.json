@@ -2,7 +2,7 @@
   "expo": {
     "name": "Do!",
     "slug": "do-private-todo",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "do-private-todo",
@@ -16,7 +16,6 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.do.simpletodo",
-      "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
       },
