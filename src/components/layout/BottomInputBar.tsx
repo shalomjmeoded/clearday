@@ -82,6 +82,14 @@ export function BottomInputBar({
     setFocused(true);
   }, []);
 
+  const dismissInput = useCallback(() => {
+    submitDismissRef.current = true;
+    suppressBlurRef.current = false;
+    setFocused(false);
+    (inputRef?.current ?? localInputRef.current)?.blur();
+    Keyboard.dismiss();
+  }, [inputRef]);
+
   const closeCalendar = useCallback(() => {
     pickerOpenRef.current = false;
     setShowCalendar(false);
@@ -130,11 +138,7 @@ export function BottomInputBar({
     setText('');
     resetDraft();
     draftActiveRef.current = false;
-    submitDismissRef.current = true;
-    suppressBlurRef.current = false;
-    setFocused(false);
-    (inputRef?.current ?? localInputRef.current)?.blur();
-    Keyboard.dismiss();
+    dismissInput();
   };
 
   const openCalendar = async () => {
@@ -303,6 +307,21 @@ export function BottomInputBar({
           }}
           blurOnSubmit={false}
         />
+        {toolbarVisible ? (
+          <Pressable
+            onPress={dismissInput}
+            style={({ pressed }) => [
+              styles.dismissBtn,
+              { backgroundColor: tokens.sectionBg },
+              pressed && { opacity: 0.75 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss keyboard"
+            hitSlop={8}
+          >
+            <Ionicons name="chevron-down" size={18} color={tokens.mutedText} />
+          </Pressable>
+        ) : null}
       </View>
       {emptyHint ? (
         <Text style={[styles.hint, { color: tokens.mutedText }]}>
@@ -458,6 +477,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     padding: 0,
     margin: 0,
+  },
+  dismissBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
   },
   hint: {
     fontSize: 13,

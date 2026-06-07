@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, StyleSheet, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
@@ -14,6 +14,7 @@ import { dayIso } from '@/utils/scheduleDates';
 import { triggerSuccessHaptic, triggerLightHaptic } from '@/utils/haptics';
 
 export default function ScheduleScreen() {
+  const addInputRef = useRef<TextInput | null>(null);
   const [segment, setSegment] = useState('tomorrow');
   const tomorrowTasks = useTaskStore((s) => s.tomorrowTasks);
   const tomorrowCompletedTasks = useTaskStore((s) => s.tomorrowCompletedTasks);
@@ -57,8 +58,10 @@ export default function ScheduleScreen() {
       : 'Nothing on the horizon.';
   const emptySubtitle =
     segment === 'tomorrow'
-      ? 'Add a task below, or swipe Today → Tomorrow.'
-      : 'Add below with a date (e.g. “friday” or “in 2 weeks”).';
+      ? 'Plan the next useful thing, or swipe a Today task to Tomorrow.'
+      : 'Add anything with a date and it will land here.';
+  const emptyActionLabel =
+    segment === 'tomorrow' ? 'Add for tomorrow' : 'Add scheduled task';
 
   const handleAdd = async (text: string, options?: QuickAddOptions) => {
     const defaultDueDate =
@@ -73,6 +76,7 @@ export default function ScheduleScreen() {
     <ScreenWithBottomBar
       aboveTabBar
       onSubmit={handleAdd}
+      inputRef={addInputRef}
       placeholder={
         segment === 'tomorrow'
           ? 'Add for tomorrow…'
@@ -99,6 +103,8 @@ export default function ScheduleScreen() {
           inlineCompleted={segment === 'tomorrow'}
           emptyMessage={emptyMessage}
           emptySubtitle={emptySubtitle}
+          emptyActionLabel={emptyActionLabel}
+          onEmptyPress={() => addInputRef.current?.focus()}
           onComplete={handleComplete}
           onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}

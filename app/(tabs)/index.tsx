@@ -242,6 +242,11 @@ export default function TodayScreen() {
     return () => clearTimeout(timer);
   }, [adding]);
 
+  const focusQuickAdd = () => {
+    setAdding(true);
+    setTimeout(() => addInputRef.current?.focus(), 60);
+  };
+
   const handleComplete = async (id: string) => {
     await triggerSuccessHaptic();
     await completeTask(id);
@@ -297,6 +302,12 @@ export default function TodayScreen() {
     if (searchOpen) Keyboard.dismiss();
     setSearchOpen((value) => !value);
     if (searchOpen) setSearchQuery('');
+  };
+
+  const closeSearch = () => {
+    Keyboard.dismiss();
+    setSearchOpen(false);
+    setSearchQuery('');
   };
 
   const openLists = async () => {
@@ -389,22 +400,45 @@ export default function TodayScreen() {
       </View>
       {searchOpen ? (
         <View style={styles.searchWrap}>
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoFocus
-            placeholder="Search"
-            placeholderTextColor={tokens.mutedText}
+          <View
             style={[
-              typography.body,
-              styles.searchInput,
+              styles.searchBox,
               {
-                color: tokens.text,
                 borderColor: tokens.border,
                 backgroundColor: tokens.sectionBg,
               },
             ]}
-          />
+          >
+            <Ionicons name="search-outline" size={16} color={tokens.mutedText} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              placeholder="Search"
+              placeholderTextColor={tokens.mutedText}
+              style={[typography.body, styles.searchInput, { color: tokens.text }]}
+            />
+            {searchQuery ? (
+              <Pressable
+                onPress={() => setSearchQuery('')}
+                style={({ pressed }) => [styles.searchIconBtn, pressed && styles.focusPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+                hitSlop={8}
+              >
+                <Ionicons name="close-circle" size={17} color={tokens.mutedText} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={closeSearch}
+              style={({ pressed }) => [styles.searchIconBtn, pressed && styles.focusPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Close search"
+              hitSlop={8}
+            >
+              <Ionicons name="chevron-up" size={18} color={tokens.mutedText} />
+            </Pressable>
+          </View>
         </View>
       ) : null}
       {sortMenuOpen ? (
@@ -487,7 +521,9 @@ export default function TodayScreen() {
               ? 'No tasks here.'
               : `No ${statusFilter} tasks.`
           }
-          emptySubtitle="Tap below when something comes to mind."
+          emptySubtitle="Capture it before it gets noisy."
+          emptyActionLabel="Add a task"
+          onEmptyPress={focusQuickAdd}
           onComplete={handleComplete}
           onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}
@@ -500,7 +536,7 @@ export default function TodayScreen() {
           reorderMode={reorderMode}
         />
         <Pressable
-          onPress={() => setAdding(true)}
+          onPress={focusQuickAdd}
           style={({ pressed }) => [
             styles.fab,
             { backgroundColor: tokens.accent },
@@ -553,13 +589,28 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
   },
-  searchInput: {
+  searchBox: {
     minHeight: 38,
     borderRadius: 19,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: spacing.md,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  searchInput: {
     paddingVertical: spacing.xs,
+    paddingHorizontal: 0,
     fontSize: 16,
+    flex: 1,
+  },
+  searchIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sortMenu: {
     marginHorizontal: spacing.lg,

@@ -80,10 +80,11 @@ export function CompletedSection({
               onComplete={() => onComplete(task.id)}
               onPress={() => onPress(task.id)}
               onArchive={() => onArchive(task.id)}
+              onMoveTomorrow={() => onMoveTomorrow(task.id)}
               onDelete={() => (onDelete ? onDelete(task.id) : onArchive(task.id))}
-              onPin={() => (onSetImportant ? onSetImportant(task.id) : onMoveTomorrow(task.id))}
+              onPin={() => (onSetImportant ? onSetImportant(task.id) : undefined)}
               onToggleRecurring={() =>
-                onToggleRecurring ? onToggleRecurring(task.id) : onMoveTomorrow(task.id)
+                onToggleRecurring ? onToggleRecurring(task.id) : undefined
               }
             />
           ))}

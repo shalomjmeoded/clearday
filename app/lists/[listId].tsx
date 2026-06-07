@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { Screen } from '@/components/layout/Screen';
@@ -19,6 +19,7 @@ import { paramString } from '@/utils/routeParams';
 export default function ListDetailScreen() {
   const { listId: listIdParam } = useLocalSearchParams<{ listId: string }>();
   const listId = paramString(listIdParam);
+  const addInputRef = useRef<TextInput | null>(null);
   const { tokens } = useTheme();
   const [listName, setListName] = useState('');
   const [listColor, setListColor] = useState<string | undefined>();
@@ -100,12 +101,16 @@ export default function ListDetailScreen() {
     <ScreenWithBottomBar
       header={header}
       onSubmit={(text, options) => addTask(text, listId, options)}
+      inputRef={addInputRef}
     >
       <TaskList
         activeTasks={listTasks}
         completedTasks={[]}
         listColors={listColor ? { [listId]: listColor } : undefined}
         emptyMessage="No tasks in this list."
+        emptySubtitle="Start this list with one clear next step."
+        emptyActionLabel="Add to this list"
+        onEmptyPress={() => addInputRef.current?.focus()}
         onComplete={async (id) => {
           await triggerSuccessHaptic();
           await completeTask(id);

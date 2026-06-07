@@ -30,6 +30,8 @@ interface Props {
   completedTasks: Task[];
   emptyMessage?: string;
   emptySubtitle?: string;
+  emptyActionLabel?: string;
+  onEmptyPress?: () => void;
   listNames?: Record<string, string>;
   listColors?: Record<string, string>;
   loading?: boolean;
@@ -64,6 +66,8 @@ export function TaskList({
   completedTasks,
   emptyMessage = 'Nothing for today. Nice.',
   emptySubtitle,
+  emptyActionLabel,
+  onEmptyPress,
   listNames,
   listColors,
   loading = false,
@@ -97,6 +101,7 @@ export function TaskList({
   const onUncompleteRef = useRef(onUncomplete);
   const onPressRef = useRef(onPress);
   const onArchiveRef = useRef(onArchive);
+  const onMoveTomorrowRef = useRef(onMoveTomorrow);
   const onDeleteRef = useRef(onDelete);
   const onSetImportantRef = useRef(onSetImportant);
   const onToggleRecurringRef = useRef(onToggleRecurring);
@@ -106,6 +111,7 @@ export function TaskList({
   onUncompleteRef.current = onUncomplete;
   onPressRef.current = onPress;
   onArchiveRef.current = onArchive;
+  onMoveTomorrowRef.current = onMoveTomorrow;
   onDeleteRef.current = onDelete;
   onSetImportantRef.current = onSetImportant;
   onToggleRecurringRef.current = onToggleRecurring;
@@ -207,6 +213,10 @@ export function TaskList({
     onArchiveRef.current(id);
   }, []);
 
+  const moveTaskToTomorrowById = useCallback((id: string) => {
+    onMoveTomorrowRef.current(id);
+  }, []);
+
   const deleteTaskById = useCallback((id: string) => {
     onDeleteRef.current(id);
   }, []);
@@ -228,6 +238,7 @@ export function TaskList({
       onComplete: () => toggleCompleteByTask(item),
       onPress: () => pressTaskById(item.id),
       onArchive: () => archiveTaskById(item.id),
+      onMoveTomorrow: () => moveTaskToTomorrowById(item.id),
       onDelete: () => deleteTaskById(item.id),
       onPin: () => pinTaskById(item.id),
       onToggleRecurring: () => toggleRecurringById(item.id),
@@ -235,6 +246,7 @@ export function TaskList({
     [
       archiveTaskById,
       deleteTaskById,
+      moveTaskToTomorrowById,
       pinTaskById,
       pressTaskById,
       resolveColorMark,
@@ -355,7 +367,14 @@ export function TaskList({
   }
 
   if (flatListData.length === 0 && visibleCompletedTasks.length === 0) {
-    return <EmptyState message={emptyMessage} subtitle={emptySubtitle} />;
+    return (
+      <EmptyState
+        message={emptyMessage}
+        subtitle={emptySubtitle}
+        actionLabel={emptyActionLabel}
+        onPress={onEmptyPress}
+      />
+    );
   }
 
   if (reorderMode && onReorder) {

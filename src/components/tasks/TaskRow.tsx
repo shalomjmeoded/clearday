@@ -36,6 +36,7 @@ interface Props {
   onPress: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  onMoveTomorrow: () => void;
   onPin: () => void;
   onToggleRecurring: () => void;
   onDragActivate?: () => void;
@@ -53,6 +54,7 @@ function TaskRowInner({
   onPress,
   onArchive,
   onDelete,
+  onMoveTomorrow,
   onPin,
   onToggleRecurring,
   onDragActivate,
@@ -197,6 +199,17 @@ function TaskRowInner({
           {task.priority === 'important' ? 'Unstar' : 'Star'}
         </Text>
       </RectButton>
+      {!completed ? (
+        <RectButton
+          accessibilityRole="button"
+          accessibilityLabel="Move task to tomorrow"
+          style={[styles.iconAction, { backgroundColor: tokens.accent }]}
+          onPress={() => runAction(onMoveTomorrow)}
+        >
+          <Ionicons name="calendar-outline" size={16} color="#fff" />
+          <Text style={styles.actionLabel}>Tomorrow</Text>
+        </RectButton>
+      ) : null}
       <RectButton
         accessibilityRole="button"
         accessibilityLabel={
