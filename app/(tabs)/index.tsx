@@ -1,7 +1,16 @@
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
@@ -272,27 +281,32 @@ export default function TodayScreen() {
   };
 
   const openFocus = async () => {
+    Keyboard.dismiss();
     await triggerMediumHaptic();
     router.push('/focus');
   };
 
   const openSettings = async () => {
+    Keyboard.dismiss();
     await triggerMediumHaptic();
     router.push('/settings');
   };
 
   const toggleSearch = async () => {
     await triggerLightHaptic();
+    if (searchOpen) Keyboard.dismiss();
     setSearchOpen((value) => !value);
     if (searchOpen) setSearchQuery('');
   };
 
   const openLists = async () => {
+    Keyboard.dismiss();
     await triggerMediumHaptic();
     router.push('/lists');
   };
 
   const toggleOrder = async () => {
+    Keyboard.dismiss();
     await triggerLightHaptic();
     setSortMenuOpen((value) => !value);
   };
@@ -401,6 +415,7 @@ export default function TodayScreen() {
               <Pressable
                 key={option.key}
                 onPress={async () => {
+                  Keyboard.dismiss();
                   await triggerLightHaptic();
                   setSortMode(option.key);
                   setSortMenuOpen(false);

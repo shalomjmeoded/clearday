@@ -99,6 +99,7 @@ export default function TaskDetailScreen() {
   const moveTaskToList = useCallback(
     async (nextListId: string) => {
       if (!taskId || nextListId === listId) return;
+      Keyboard.dismiss();
       const previousListId = listId;
       await triggerLightHaptic();
       setListId(nextListId);
@@ -157,6 +158,7 @@ export default function TaskDetailScreen() {
       return;
     }
     setTitleError(undefined);
+    Keyboard.dismiss();
     setSaving(true);
 
     try {
@@ -247,6 +249,7 @@ export default function TaskDetailScreen() {
   };
 
   const removeReminder = async () => {
+    Keyboard.dismiss();
     await triggerLightHaptic();
     setReminderAt(undefined);
   };
@@ -277,6 +280,7 @@ export default function TaskDetailScreen() {
 
   const clearDueDate = async () => {
     if (!taskId) return;
+    Keyboard.dismiss();
     await triggerLightHaptic();
     setDueDate(undefined);
     await taskRepository.update(taskId, { dueDate: undefined });
@@ -301,6 +305,7 @@ export default function TaskDetailScreen() {
 
   const toggleDone = async () => {
     if (!taskId || !task) return;
+    Keyboard.dismiss();
     if (task.status === 'completed') {
       await triggerLightHaptic();
       await uncompleteTask(taskId);
@@ -366,6 +371,7 @@ export default function TaskDetailScreen() {
             <Pressable
               key={p.key}
               onPress={async () => {
+                Keyboard.dismiss();
                 await triggerLightHaptic();
                 setPriority(p.key);
               }}
@@ -396,6 +402,7 @@ export default function TaskDetailScreen() {
         <View style={styles.swatches}>
           <Pressable
             onPress={async () => {
+              Keyboard.dismiss();
               await triggerLightHaptic();
               setColor(undefined);
             }}
@@ -413,6 +420,7 @@ export default function TaskDetailScreen() {
             <Pressable
               key={item.key}
               onPress={async () => {
+                Keyboard.dismiss();
                 await triggerLightHaptic();
                 setColor(item.value);
               }}
@@ -523,6 +531,7 @@ export default function TaskDetailScreen() {
                 <Pressable
                   key={option.key}
                   onPress={async () => {
+                    Keyboard.dismiss();
                     if (option.key !== 'none' && !isPro) {
                       Alert.alert(
                         'Do! Pro',

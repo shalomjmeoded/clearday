@@ -1,6 +1,6 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FormScreen } from '@/components/layout/FormScreen';
 import { Screen } from '@/components/layout/Screen';
@@ -59,6 +59,7 @@ export default function ListEditScreen() {
       return;
     }
     setNameError(undefined);
+    Keyboard.dismiss();
     setSaving(true);
     try {
       await triggerLightHaptic();
@@ -72,6 +73,7 @@ export default function ListEditScreen() {
 
   const confirmDelete = () => {
     if (!listId || isInbox) return;
+    Keyboard.dismiss();
     Alert.alert(
       `Delete “${name.trim()}”?`,
       'Tasks in this list will move to Inbox.',
@@ -150,6 +152,7 @@ export default function ListEditScreen() {
             <Pressable
               key={swatch}
               onPress={async () => {
+                Keyboard.dismiss();
                 await triggerLightHaptic();
                 setColor(swatch);
               }}

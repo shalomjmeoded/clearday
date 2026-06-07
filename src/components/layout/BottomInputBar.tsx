@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
@@ -55,6 +55,7 @@ export function BottomInputBar({
   const localInputRef = useRef<TextInput>(null);
   const pickerOpenRef = useRef(false);
   const suppressBlurRef = useRef(false);
+  const submitDismissRef = useRef(false);
   const draftActiveRef = useRef(false);
 
   const pickerOpen = showCalendar || showTime || showColor;
@@ -128,6 +129,12 @@ export function BottomInputBar({
     onSubmit(trimmed, Object.keys(options).length > 0 ? options : undefined);
     setText('');
     resetDraft();
+    draftActiveRef.current = false;
+    submitDismissRef.current = true;
+    suppressBlurRef.current = false;
+    setFocused(false);
+    (inputRef?.current ?? localInputRef.current)?.blur();
+    Keyboard.dismiss();
   };
 
   const openCalendar = async () => {
@@ -277,6 +284,11 @@ export function BottomInputBar({
           }}
           onBlur={() => {
             setTimeout(() => {
+              if (submitDismissRef.current) {
+                submitDismissRef.current = false;
+                setFocused(false);
+                return;
+              }
               if (
                 pickerOpenRef.current ||
                 suppressBlurRef.current ||
