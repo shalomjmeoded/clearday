@@ -24,6 +24,11 @@ interface Props {
   inputRef?: React.RefObject<TextInput | null>;
   /** Parent-controlled add mode — keeps toolbar/input active after picker actions. */
   keepEditing?: boolean;
+  active?: boolean;
+  inactiveContent?: React.ReactNode;
+  /** Called after dismissing an empty, option-free draft. */
+  onDismissEmpty?: () => void;
+  concealed?: boolean;
 }
 
 type DatePick = 'today' | 'tomorrow' | 'pick';
@@ -35,6 +40,10 @@ export function BottomInputBar({
   aboveTabBar = false,
   inputRef,
   keepEditing = false,
+  active = true,
+  inactiveContent,
+  onDismissEmpty,
+  concealed = false,
 }: Props) {
   const { tokens } = useTheme();
   const { bottomSafe, tabBarHeight } = useScreenInsets({
@@ -62,12 +71,18 @@ export function BottomInputBar({
   pickerOpenRef.current = pickerOpen;
 
   draftActiveRef.current =
-    keepEditing ||
     draftDatePick != null ||
     draftReminderAt != null ||
     draftColor != null ||
     draftPinned ||
     Boolean(text.trim());
+
+  const hasDraftContent =
+    Boolean(text.trim()) ||
+    draftDatePick != null ||
+    draftReminderAt != null ||
+    draftColor != null ||
+    draftPinned;
 
   const focusInput = useCallback(() => {
     setTimeout(() => {
@@ -82,13 +97,15 @@ export function BottomInputBar({
     setFocused(true);
   }, []);
 
-  const dismissInput = useCallback(() => {
+  const dismissInput = useCallback((notifyEmpty = true) => {
+    const shouldDismissEmpty = notifyEmpty && !draftActiveRef.current;
     submitDismissRef.current = true;
     suppressBlurRef.current = false;
     setFocused(false);
     (inputRef?.current ?? localInputRef.current)?.blur();
     Keyboard.dismiss();
-  }, [inputRef]);
+    if (shouldDismissEmpty) onDismissEmpty?.();
+  }, [inputRef, onDismissEmpty]);
 
   const closeCalendar = useCallback(() => {
     pickerOpenRef.current = false;
@@ -138,7 +155,7 @@ export function BottomInputBar({
     setText('');
     resetDraft();
     draftActiveRef.current = false;
-    dismissInput();
+    dismissInput(false);
   };
 
   const openCalendar = async () => {
@@ -199,23 +216,33 @@ export function BottomInputBar({
     keepEditing ||
     focused ||
     pickerOpen ||
-    Boolean(text.trim()) ||
-    draftDatePick != null ||
-    draftReminderAt != null ||
-    draftColor != null ||
-    draftPinned;
+    hasDraftContent;
+  const restoreInputVisible = hasDraftContent && !focused && !pickerOpen;
+
+  const stickyStyle = [
+    styles.sticky,
+    concealed && styles.concealed,
+    {
+      backgroundColor: tokens.background,
+      borderTopColor: tokens.border,
+      paddingBottom: aboveTabBar ? spacing.sm : Math.max(bottomSafe, spacing.sm),
+    },
+  ];
+
+  if (!active) {
+    const inactiveStyle = [
+      styles.inactiveSticky,
+      {
+        bottom: aboveTabBar ? spacing.lg : Math.max(bottomSafe, spacing.sm),
+      },
+    ];
+    return inactiveContent ? <View style={inactiveStyle}>{inactiveContent}</View> : null;
+  }
 
   const bar = (
     <KeyboardStickyView
       offset={{ closed: 0, opened: spacing.sm }}
-      style={[
-        styles.sticky,
-        {
-          backgroundColor: tokens.background,
-          borderTopColor: tokens.border,
-          paddingBottom: aboveTabBar ? spacing.sm : Math.max(bottomSafe, spacing.sm),
-        },
-      ]}
+      style={stickyStyle}
     >
       {toolbarVisible ? (
         <View style={styles.toolbar}>
@@ -293,33 +320,35 @@ export function BottomInputBar({
                 setFocused(false);
                 return;
               }
-              if (
-                pickerOpenRef.current ||
-                suppressBlurRef.current ||
-                draftActiveRef.current ||
-                keepEditing
-              ) {
+              if (pickerOpenRef.current || suppressBlurRef.current) {
                 focusInput();
                 return;
               }
               setFocused(false);
+              if (!draftActiveRef.current) onDismissEmpty?.();
             }, 120);
           }}
           blurOnSubmit={false}
         />
         {toolbarVisible ? (
           <Pressable
-            onPress={dismissInput}
+            onPress={restoreInputVisible ? focusInput : () => dismissInput()}
             style={({ pressed }) => [
               styles.dismissBtn,
               { backgroundColor: tokens.sectionBg },
               pressed && { opacity: 0.75 },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Dismiss keyboard"
+            accessibilityLabel={
+              restoreInputVisible ? 'Show keyboard' : 'Dismiss keyboard'
+            }
             hitSlop={8}
           >
-            <Ionicons name="chevron-down" size={18} color={tokens.mutedText} />
+            <Ionicons
+              name={restoreInputVisible ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={tokens.mutedText}
+            />
           </Pressable>
         ) : null}
       </View>
@@ -428,6 +457,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  inactiveSticky: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingHorizontal: spacing.lg,
+    paddingTop: 0,
+    paddingBottom: 0,
+    borderTopWidth: 0,
+    backgroundColor: 'transparent',
+  },
+  concealed: {
+    opacity: 0,
   },
   toolbar: {
     flexDirection: 'row',

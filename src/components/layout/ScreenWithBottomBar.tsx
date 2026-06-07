@@ -21,6 +21,10 @@ interface Props {
   showInputBar?: boolean;
   /** Keep quick-add toolbar/input active while picking date, color, etc. */
   keepEditing?: boolean;
+  inputBarActive?: boolean;
+  inactiveInputContent?: React.ReactNode;
+  onDismissEmpty?: () => void;
+  inputBarConcealed?: boolean;
   dismissKeyboardOnBackdropPress?: boolean;
 }
 
@@ -38,11 +42,15 @@ export function ScreenWithBottomBar({
   inputRef,
   showInputBar = true,
   keepEditing = false,
+  inputBarActive = true,
+  inactiveInputContent,
+  onDismissEmpty,
+  inputBarConcealed = false,
   dismissKeyboardOnBackdropPress = true,
 }: Props) {
   const { listBottomInset } = useScreenInsets({
     variant: aboveTabBar ? 'tab' : 'stack',
-    hasBottomBar: showInputBar,
+    hasBottomBar: showInputBar && inputBarActive,
     aboveTabBar,
   });
 
@@ -64,6 +72,10 @@ export function ScreenWithBottomBar({
           placeholder={placeholder}
           inputRef={inputRef}
           keepEditing={keepEditing}
+          active={inputBarActive}
+          inactiveContent={inactiveInputContent}
+          onDismissEmpty={onDismissEmpty}
+          concealed={inputBarConcealed}
         />
       ) : null}
     </Screen>

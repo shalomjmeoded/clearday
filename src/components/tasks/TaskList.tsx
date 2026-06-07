@@ -101,7 +101,6 @@ export function TaskList({
   const onUncompleteRef = useRef(onUncomplete);
   const onPressRef = useRef(onPress);
   const onArchiveRef = useRef(onArchive);
-  const onMoveTomorrowRef = useRef(onMoveTomorrow);
   const onDeleteRef = useRef(onDelete);
   const onSetImportantRef = useRef(onSetImportant);
   const onToggleRecurringRef = useRef(onToggleRecurring);
@@ -111,7 +110,6 @@ export function TaskList({
   onUncompleteRef.current = onUncomplete;
   onPressRef.current = onPress;
   onArchiveRef.current = onArchive;
-  onMoveTomorrowRef.current = onMoveTomorrow;
   onDeleteRef.current = onDelete;
   onSetImportantRef.current = onSetImportant;
   onToggleRecurringRef.current = onToggleRecurring;
@@ -213,10 +211,6 @@ export function TaskList({
     onArchiveRef.current(id);
   }, []);
 
-  const moveTaskToTomorrowById = useCallback((id: string) => {
-    onMoveTomorrowRef.current(id);
-  }, []);
-
   const deleteTaskById = useCallback((id: string) => {
     onDeleteRef.current(id);
   }, []);
@@ -238,7 +232,6 @@ export function TaskList({
       onComplete: () => toggleCompleteByTask(item),
       onPress: () => pressTaskById(item.id),
       onArchive: () => archiveTaskById(item.id),
-      onMoveTomorrow: () => moveTaskToTomorrowById(item.id),
       onDelete: () => deleteTaskById(item.id),
       onPin: () => pinTaskById(item.id),
       onToggleRecurring: () => toggleRecurringById(item.id),
@@ -246,7 +239,6 @@ export function TaskList({
     [
       archiveTaskById,
       deleteTaskById,
-      moveTaskToTomorrowById,
       pinTaskById,
       pressTaskById,
       resolveColorMark,

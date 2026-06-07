@@ -117,7 +117,6 @@ export default function FinishedTasksScreen() {
                   },
                 ])
               }
-              onMoveTomorrow={() => undefined}
               onPin={() => setImportant(item.id)}
               onToggleRecurring={() => toggleRecurring(item.id)}
             />

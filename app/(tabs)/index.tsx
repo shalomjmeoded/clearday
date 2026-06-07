@@ -56,6 +56,8 @@ function filterTasksByList(tasks: Task[], listId: string): Task[] {
 export default function TodayScreen() {
   const { tokens } = useTheme();
   const addInputRef = useRef<TextInput | null>(null);
+  const closeAddTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeAddSubscriptionRef = useRef<ReturnType<typeof Keyboard.addListener> | null>(null);
   const lists = useListStore((s) => s.lists);
   const defaultListId = useSettingsStore((s) => s.settings.defaultListId);
   const todayTasks = useTaskStore((s) => s.todayTasks);
@@ -236,6 +238,32 @@ export default function TodayScreen() {
     { key: 'tomorrow' as const, label: 'Tomorrow', count: tomorrowCount },
   ];
 
+  const clearPendingQuickAddClose = useCallback(() => {
+    if (closeAddTimerRef.current) {
+      clearTimeout(closeAddTimerRef.current);
+      closeAddTimerRef.current = null;
+    }
+    closeAddSubscriptionRef.current?.remove();
+    closeAddSubscriptionRef.current = null;
+  }, []);
+
+  const closeQuickAddAfterKeyboard = useCallback(() => {
+    clearPendingQuickAddClose();
+
+    const finishClose = () => {
+      clearPendingQuickAddClose();
+      setAdding(false);
+    };
+
+    closeAddSubscriptionRef.current = Keyboard.addListener(
+      'keyboardDidHide',
+      finishClose
+    );
+    closeAddTimerRef.current = setTimeout(finishClose, 360);
+  }, [clearPendingQuickAddClose]);
+
+  useEffect(() => clearPendingQuickAddClose, [clearPendingQuickAddClose]);
+
   useEffect(() => {
     if (!adding) return;
     const timer = setTimeout(() => addInputRef.current?.focus(), 60);
@@ -243,6 +271,7 @@ export default function TodayScreen() {
   }, [adding]);
 
   const focusQuickAdd = () => {
+    clearPendingQuickAddClose();
     setAdding(true);
     setTimeout(() => addInputRef.current?.focus(), 60);
   };
@@ -282,7 +311,7 @@ export default function TodayScreen() {
       Alert.alert('Could not add task', 'Please try again.');
       return;
     }
-    setAdding(false);
+    closeQuickAddAfterKeyboard();
   };
 
   const openFocus = async () => {
@@ -503,9 +532,26 @@ export default function TodayScreen() {
       onSubmit={handleAdd}
       header={header}
       inputRef={addInputRef}
-      showInputBar={adding}
+      showInputBar
+      inputBarActive={adding}
       keepEditing={adding}
-      dismissKeyboardOnBackdropPress={!adding}
+      onDismissEmpty={closeQuickAddAfterKeyboard}
+      inactiveInputContent={
+        <View style={styles.idleAddWrap}>
+          <Pressable
+            onPress={focusQuickAdd}
+            style={({ pressed }) => [
+              styles.idleAddButton,
+              { backgroundColor: tokens.accent },
+              pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Add task"
+          >
+            <Ionicons name="add" size={26} color="#fff" />
+          </Pressable>
+        </View>
+      }
     >
       <View style={styles.list}>
         <TaskList
@@ -522,8 +568,8 @@ export default function TodayScreen() {
               : `No ${statusFilter} tasks.`
           }
           emptySubtitle="Capture it before it gets noisy."
-          emptyActionLabel="Add a task"
-          onEmptyPress={focusQuickAdd}
+          emptyActionLabel={adding ? undefined : 'Add a task'}
+          onEmptyPress={adding ? undefined : focusQuickAdd}
           onComplete={handleComplete}
           onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}
@@ -535,16 +581,6 @@ export default function TodayScreen() {
           onReorder={(orderedIds) => reorderTasks(orderedIds, defaultListId)}
           reorderMode={reorderMode}
         />
-        <Pressable
-          onPress={focusQuickAdd}
-          style={({ pressed }) => [
-            styles.fab,
-            { backgroundColor: tokens.accent },
-            pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
-          ]}
-        >
-          <Ionicons name="add" size={26} color="#fff" />
-        </Pressable>
       </View>
     </ScreenWithBottomBar>
   );
@@ -663,10 +699,12 @@ const styles = StyleSheet.create({
   },
   focusPressed: { opacity: 0.75, transform: [{ scale: 0.98 }] },
   list: { flex: 1 },
-  fab: {
-    position: 'absolute',
-    right: spacing.lg,
-    bottom: spacing.lg,
+  idleAddWrap: {
+    minHeight: 52,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  idleAddButton: {
     width: 52,
     height: 52,
     borderRadius: 26,
