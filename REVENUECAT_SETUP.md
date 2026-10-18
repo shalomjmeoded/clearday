@@ -46,6 +46,8 @@ EXPO_PUBLIC_REVENUECAT_API_KEY=appl_xxxxx
 
 Use `.env` for local development and EAS environment variables for cloud builds. This is a public SDK key, but `.env` should still stay uncommitted.
 
+An ignored local `.env` is not supplied through Git to EAS cloud builds. Configure the key separately in the EAS development or production environment used by the build. `EXPO_PUBLIC_*` values are embedded in the released app; only client-safe public SDK keys belong here. Secret RevenueCat API keys, store service-account credentials, and signing keys belong in backend or build credential storage, never in the app bundle.
+
 ## 4. Apple App Store Connect
 
 1. Create subscription group (e.g. "Do! Pro").
@@ -92,7 +94,7 @@ Use `.env` for local development and EAS environment variables for cloud builds.
 Expo Go uses RevenueCat **Preview API Mode** (mock only). Real purchases need a **development build**:
 
 ```bash
-npm install
+npm ci
 cp .env.example .env   # add your API key
 npx eas login
 npx eas build:configure

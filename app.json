@@ -80,7 +80,8 @@
           "color": "#C8755D"
         }
       ],
-      "./plugins/withAndroidNamespace.js"
+      "./plugins/withAndroidNamespace.js",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
