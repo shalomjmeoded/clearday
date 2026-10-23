@@ -20,9 +20,13 @@ import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
-import { formatTime } from '@/utils/dates';
+import { formatDisplayDate, formatTime, isToday } from '@/utils/dates';
 import { formatTaskSideDate } from '@/utils/formatTaskSideDate';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
+import {
+  isReminderOnDifferentDay,
+  isReminderPast,
+} from '@/utils/reminderTime';
 import { triggerSoftHaptic } from '@/utils/haptics';
 
 const SWIPE_ACTIVE_OFFSET_X: [number, number] = [-10, 10];
@@ -74,6 +78,17 @@ function TaskRowInner({
   const dragEnabled = Boolean(onDragActivate) && !completed;
   const showPriorityMarker =
     task.priority === 'important' || task.priority === 'must_do_today';
+  // A reminder that already went by (or was never in the future) is shown struck through.
+  const reminderPast = !completed && isReminderPast(task.reminderAt);
+  // Name the day only when the time alone would be ambiguous.
+  const reminderNeedsDay = task.dueDate
+    ? isReminderOnDifferentDay(task.reminderAt, task.dueDate)
+    : Boolean(task.reminderAt) && !isToday(task.reminderAt);
+  const reminderLabel = task.reminderAt
+    ? reminderNeedsDay
+      ? `${formatDisplayDate(task.reminderAt)} ${formatTime(task.reminderAt)}`
+      : formatTime(task.reminderAt)
+    : '';
 
   const openTask = useCallback(() => {
     if (isDragging) return;
@@ -197,23 +212,26 @@ function TaskRowInner({
           {task.priority === 'important' ? 'Unstar' : 'Star'}
         </Text>
       </RectButton>
-      <RectButton
-        accessibilityRole="button"
-        accessibilityLabel={
-          isRecurring(task.recurrence) ? 'Stop repeating' : 'Repeat task'
-        }
-        style={[styles.iconAction, { backgroundColor: tokens.actionRepeat }]}
-        onPress={() => runAction(onToggleRecurring)}
-      >
-        <Ionicons
-          name={isRecurring(task.recurrence) ? 'repeat' : 'repeat-outline'}
-          size={16}
-          color="#fff"
-        />
-        <Text style={styles.actionLabel}>
-          {isRecurring(task.recurrence) ? 'Stop' : 'Repeat'}
-        </Text>
-      </RectButton>
+      {/* Repeat only applies to open tasks, so it is left out once done. */}
+      {!completed ? (
+        <RectButton
+          accessibilityRole="button"
+          accessibilityLabel={
+            isRecurring(task.recurrence) ? 'Stop repeating' : 'Repeat task'
+          }
+          style={[styles.iconAction, { backgroundColor: tokens.actionRepeat }]}
+          onPress={() => runAction(onToggleRecurring)}
+        >
+          <Ionicons
+            name={isRecurring(task.recurrence) ? 'repeat' : 'repeat-outline'}
+            size={16}
+            color="#fff"
+          />
+          <Text style={styles.actionLabel}>
+            {isRecurring(task.recurrence) ? 'Stop' : 'Repeat'}
+          </Text>
+        </RectButton>
+      ) : null}
       <RectButton
         accessibilityRole="button"
         accessibilityLabel={completed ? 'Mark as to-do' : 'Mark done'}
@@ -267,8 +285,14 @@ function TaskRowInner({
       {(task.reminderAt || listName || isRecurring(task.recurrence)) && !completed && (
         <View style={styles.meta}>
           {task.reminderAt ? (
-            <Text style={[typography.meta, { color: tokens.mutedText }]}>
-              {formatTime(task.reminderAt)}
+            <Text
+              style={[
+                typography.meta,
+                { color: tokens.mutedText },
+                reminderPast && styles.strikethrough,
+              ]}
+            >
+              {reminderLabel}
             </Text>
           ) : null}
           {isRecurring(task.recurrence) ? (
@@ -283,10 +307,19 @@ function TaskRowInner({
           ) : null}
         </View>
       )}
-      {completed && task.reminderAt ? (
-        <Text style={[typography.meta, { color: tokens.mutedText }]}>
-          {formatTime(task.reminderAt)}
-        </Text>
+      {completed && (task.reminderAt || task.recurringTaskId) ? (
+        <View style={styles.meta}>
+          {task.recurringTaskId ? (
+            <Text style={[typography.meta, { color: tokens.mutedText }]}>
+              ↻
+            </Text>
+          ) : null}
+          {task.reminderAt ? (
+            <Text style={[typography.meta, { color: tokens.mutedText }]}>
+              {reminderLabel}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
     </Pressable>
   );

@@ -12,6 +12,7 @@ const STUBS = {
   'expo-document-picker': 'expo-document-picker.ts',
   'expo-file-system/legacy': 'expo-file-system-legacy.ts',
   'expo-sharing': 'expo-sharing.ts',
+  'expo-router': 'expo-router.ts',
 };
 
 export function resolve(specifier, context, nextResolve) {

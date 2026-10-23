@@ -10,6 +10,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test:backup": "node --import tsx --import ./test-harness/loader.mjs --require ./test-harness/register-cjs.cjs test-harness/run-tests.ts",
+    "test:unit": "node --import tsx --import ./test-harness/loader.mjs --require ./test-harness/register-cjs.cjs test-harness/run-unit-tests.ts",
+    "test": "npm run test:unit && npm run test:backup",
     "check:release": "npx expo install --check && npx tsc --noEmit && npx expo config --type public",
     "build:ios:production": "npx eas-cli build --platform ios --profile production",
     "build:ios:production:submit": "npx eas-cli build --platform ios --profile production --auto-submit",

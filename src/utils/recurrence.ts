@@ -28,36 +28,53 @@ export function isRecurring(recurrence: TaskRecurrence): boolean {
   return recurrence !== 'none';
 }
 
-function stepRecurrence(date: Date, recurrence: TaskRecurrence): Date {
+/**
+ * The n-th occurrence after `anchor`. Steps are always taken from the anchor
+ * (not from the previous occurrence) so month-end and leap-day anchors do not
+ * drift: Jan 31 → Feb 28 → Mar 31, and Feb 29 → Feb 28 → Feb 29.
+ */
+function occurrenceFromAnchor(
+  anchor: Date,
+  recurrence: TaskRecurrence,
+  steps: number
+): Date {
   switch (recurrence) {
     case 'daily':
-      return addDays(date, 1);
+      return addDays(anchor, steps);
     case 'weekly':
-      return addWeeks(date, 1);
+      return addWeeks(anchor, steps);
     case 'biweekly':
-      return addWeeks(date, 2);
+      return addWeeks(anchor, steps * 2);
     case 'monthly':
-      return addMonths(date, 1);
+      return addMonths(anchor, steps);
     case 'yearly':
-      return addYears(date, 1);
+      return addYears(anchor, steps);
     default:
-      return date;
+      return anchor;
   }
 }
 
-/** Next due date strictly after today (or after anchor if anchor is in the future). */
+/**
+ * Next due date strictly after today (or after the anchor if the anchor is in
+ * the future). Overdue tasks catch up to the next future occurrence instead of
+ * cycling through every missed one.
+ */
 export function getNextDueDate(
   anchorIso: string,
-  recurrence: TaskRecurrence
+  recurrence: TaskRecurrence,
+  now: Date = new Date()
 ): string {
   if (recurrence === 'none') return anchorIso;
 
-  let next = startOfDay(parseISO(anchorIso));
-  const today = startOfDay(new Date());
+  const anchor = startOfDay(parseISO(anchorIso));
+  const today = startOfDay(now);
 
-  do {
-    next = stepRecurrence(next, recurrence);
-  } while (next <= today);
+  let steps = 1;
+  let next = occurrenceFromAnchor(anchor, recurrence, steps);
+  while (next <= today) {
+    steps += 1;
+    next = occurrenceFromAnchor(anchor, recurrence, steps);
+  }
 
   return next.toISOString();
 }

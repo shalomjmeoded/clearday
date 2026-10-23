@@ -1,4 +1,11 @@
-import { format, parseISO, setHours, setMinutes, startOfDay } from 'date-fns';
+import {
+  format,
+  isSameDay,
+  parseISO,
+  setHours,
+  setMinutes,
+  startOfDay,
+} from 'date-fns';
 
 export function padTimeUnit(value: number): string {
   return String(value).padStart(2, '0');
@@ -31,17 +38,41 @@ export function getHoursMinutesFromIso(
   return parseTimeKey(fallbackKey);
 }
 
+/**
+ * Reminder ISO for a clock time. With a due date the reminder lands on that
+ * day (even if already passed — callers decide how to surface that). Without
+ * one it lands today, or tomorrow when the time has already passed.
+ */
 export function buildReminderIso(
   hours: number,
   minutes: number,
-  dueDateIso?: string
+  dueDateIso?: string,
+  now: Date = new Date()
 ): string {
-  const base = dueDateIso ? startOfDay(parseISO(dueDateIso)) : startOfDay(new Date());
+  const base = dueDateIso ? startOfDay(parseISO(dueDateIso)) : startOfDay(now);
   let date = setMinutes(setHours(base, hours), minutes);
-  if (!dueDateIso && date.getTime() <= Date.now()) {
-    date = setMinutes(setHours(startOfDay(new Date(Date.now() + 86400000)), hours), minutes);
+  if (!dueDateIso && date.getTime() <= now.getTime()) {
+    date = setMinutes(
+      setHours(startOfDay(new Date(now.getTime() + 86400000)), hours),
+      minutes
+    );
   }
   return date.toISOString();
+}
+
+/** True when the reminder moment has already passed (nothing will fire). */
+export function isReminderPast(iso?: string, now: Date = new Date()): boolean {
+  if (!iso) return false;
+  return parseISO(iso).getTime() <= now.getTime();
+}
+
+/** True when the reminder falls on a different calendar day than the due date. */
+export function isReminderOnDifferentDay(
+  reminderIso?: string,
+  dueDateIso?: string
+): boolean {
+  if (!reminderIso || !dueDateIso) return false;
+  return !isSameDay(parseISO(reminderIso), parseISO(dueDateIso));
 }
 
 export const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => i);

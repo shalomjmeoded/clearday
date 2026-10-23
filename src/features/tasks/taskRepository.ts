@@ -117,13 +117,24 @@ export const taskRepository = {
       dueDate,
       updatedAt: now,
     };
+    if ('recurringTaskId' in input) {
+      updated.recurringTaskId = input.recurringTaskId;
+    }
     if ('reminderAt' in input) {
       updated.reminderAt = input.reminderAt;
+    } else if (
+      existing.reminderAt &&
+      dueDate &&
+      dueDate !== existing.dueDate
+    ) {
+      // The due day moved and the caller said nothing about the reminder:
+      // keep the same clock time on the new day instead of firing on the old one.
+      updated.reminderAt = shiftReminderToDueDate(existing.reminderAt, dueDate);
     }
 
     await db.runAsync(
       `UPDATE tasks SET title = ?, notes = ?, status = ?, priority = ?, color = ?, dueDate = ?, reminderAt = ?,
-        recurrence = ?, listId = ?, sortOrder = ?, completedAt = ?, updatedAt = ?, deletedAt = ?
+        recurrence = ?, recurringTaskId = ?, listId = ?, sortOrder = ?, completedAt = ?, updatedAt = ?, deletedAt = ?
        WHERE id = ?`,
       [
         updated.title,
@@ -134,6 +145,7 @@ export const taskRepository = {
         updated.dueDate ?? null,
         updated.reminderAt ?? null,
         updated.recurrence,
+        updated.recurringTaskId ?? null,
         updated.listId ?? INBOX_LIST_ID,
         updated.sortOrder,
         updated.completedAt ?? null,
@@ -152,9 +164,43 @@ export const taskRepository = {
     return updated;
   },
 
-  async complete(id: string): Promise<Task | null> {
+  /**
+   * Records a finished occurrence of a repeating task as its own completed
+   * row, the way other task apps log each repeat, so the work shows up in
+   * Finished and the completed sections. The live task keeps its id and
+   * simply moves to its next date.
+   */
+  async logRecurringOccurrence(task: Task): Promise<string> {
+    const db = await getDb();
+    const now = nowIso();
+    const occurrenceId = createId();
+    await db.runAsync(
+      `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, recurringTaskId, listId, sortOrder, completedAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, 'none', ?, ?, ?, ?, ?, ?)`,
+      [
+        occurrenceId,
+        task.title,
+        task.notes ?? null,
+        task.priority,
+        task.color ?? null,
+        task.dueDate ?? null,
+        task.reminderAt ?? null,
+        task.id,
+        task.listId ?? INBOX_LIST_ID,
+        task.sortOrder,
+        now,
+        task.createdAt,
+        now,
+      ]
+    );
+    return occurrenceId;
+  },
+
+  async complete(
+    id: string
+  ): Promise<{ task: Task | null; occurrenceId?: string }> {
     const existing = await this.getById(id);
-    if (!existing) return null;
+    if (!existing) return { task: null };
 
     if (isRecurring(existing.recurrence)) {
       const anchor = existing.dueDate ?? todayRange().start;
@@ -166,24 +212,55 @@ export const taskRepository = {
       const priority =
         existing.priority === 'must_do_today' ? 'normal' : existing.priority;
 
-      return this.update(id, {
+      const occurrenceId = await this.logRecurringOccurrence(existing);
+      const task = await this.update(id, {
         status: 'active',
         completedAt: undefined,
         dueDate: nextDue,
         reminderAt,
         priority,
       });
+      return { task, occurrenceId };
     }
 
+    // The reminder is kept on the task: completing cancels the pending
+    // notification (see update), and reopening restores the reminder. A time
+    // that has already passed is never rescheduled, matching how other task
+    // apps treat a reopened overdue task.
     const now = nowIso();
-    return this.update(id, {
+    const task = await this.update(id, {
       status: 'completed',
       completedAt: now,
-      reminderAt: undefined,
     });
+    return { task };
   },
 
+  /**
+   * Reopening a logged repeat means "I did not actually do that one": the
+   * record is removed and the live task is pulled back to that date, rather
+   * than a duplicate of the repeating task being resurrected.
+   */
   async uncomplete(id: string): Promise<Task | null> {
+    const existing = await this.getById(id);
+
+    if (existing?.recurringTaskId) {
+      const live = await this.getById(existing.recurringTaskId);
+      // Only fold back into a task that is still in play. An archived series
+      // should not be resurrected by reopening one old record.
+      if (live && live.status === 'active') {
+        await this.deletePermanent(id);
+        return this.update(live.id, {
+          status: 'active',
+          completedAt: undefined,
+          dueDate: existing.dueDate,
+          reminderAt: existing.reminderAt,
+          priority: existing.priority,
+        });
+      }
+      // The series is gone or archived, so the record becomes a plain task.
+      await this.update(id, { recurringTaskId: undefined });
+    }
+
     return this.update(id, {
       status: 'active',
       completedAt: undefined,
@@ -191,7 +268,6 @@ export const taskRepository = {
   },
 
   async archive(id: string): Promise<Task | null> {
-    await cancelReminderForTask(id);
     return this.update(id, { status: 'archived', reminderAt: undefined });
   },
 
@@ -233,6 +309,17 @@ export const taskRepository = {
 
   async scheduleForDate(id: string, dueDate: string): Promise<Task | null> {
     return this.update(id, { dueDate });
+  },
+
+  /** Logged completions of a repeating task, newest first. */
+  async getOccurrences(recurringTaskId: string): Promise<Task[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<Record<string, unknown>>(
+      `SELECT * FROM tasks WHERE recurringTaskId = ? AND status = 'completed' AND deletedAt IS NULL
+       ORDER BY completedAt DESC`,
+      [recurringTaskId]
+    );
+    return rows.map(mapRowToTask);
   },
 
   async getAllActive(): Promise<Task[]> {

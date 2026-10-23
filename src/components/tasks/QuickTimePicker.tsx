@@ -1,12 +1,20 @@
 import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { ReminderTimePicker } from '@/components/reminders/ReminderTimePicker';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
-import { buildReminderIso } from '@/utils/reminderTime';
+import { formatDisplayDate, formatTime } from '@/utils/dates';
+import {
+  buildReminderIso,
+  formatTimeKey,
+  formatTimeKeyLabel,
+  isReminderPast,
+  parseTimeKey,
+} from '@/utils/reminderTime';
 import { triggerSelectionHaptic } from '@/utils/haptics';
 
 const PRESETS = [
@@ -24,13 +32,33 @@ interface Props {
 
 export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) {
   const { tokens } = useTheme();
+  const defaultReminderTime = useSettingsStore(
+    (s) => s.settings.defaultReminderTime
+  );
+  const defaultTime = parseTimeKey(defaultReminderTime);
   const [showCustom, setShowCustom] = useState(false);
-  const [customHours, setCustomHours] = useState(9);
-  const [customMinutes, setCustomMinutes] = useState(0);
+  const [customHours, setCustomHours] = useState(defaultTime.hours);
+  const [customMinutes, setCustomMinutes] = useState(defaultTime.minutes);
+
+  // The user's default leads the list; a preset at the same time is dropped to avoid a duplicate.
+  const presets = [
+    { label: 'Default', hours: defaultTime.hours, minutes: defaultTime.minutes },
+    ...PRESETS.filter(
+      (preset) =>
+        formatTimeKey(preset.hours, preset.minutes) !== defaultReminderTime
+    ),
+  ];
 
   const applyTime = async (hours: number, minutes: number) => {
-    await triggerSelectionHaptic();
     const reminderAt = buildReminderIso(hours, minutes, dueDate);
+    if (isReminderPast(reminderAt)) {
+      Alert.alert(
+        'That time has passed',
+        `${formatDisplayDate(dueDate)} at ${formatTime(reminderAt)} is already behind us. Pick a later time or another day.`
+      );
+      return;
+    }
+    await triggerSelectionHaptic();
     const resolvedDue =
       dueDate ??
       (() => {
@@ -60,7 +88,7 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
             <Text style={[typography.screenTitle, styles.title, { color: tokens.text }]}>
               Reminder
             </Text>
-            {PRESETS.map((preset) => (
+            {presets.map((preset) => (
               <Pressable
                 key={preset.label}
                 onPress={() => applyTime(preset.hours, preset.minutes)}
@@ -72,8 +100,7 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
               >
                 <Text style={[typography.body, { color: tokens.text }]}>{preset.label}</Text>
                 <Text style={[typography.meta, { color: tokens.mutedText }]}>
-                  {preset.hours.toString().padStart(2, '0')}:
-                  {preset.minutes.toString().padStart(2, '0')}
+                  {formatTimeKeyLabel(formatTimeKey(preset.hours, preset.minutes))}
                 </Text>
               </Pressable>
             ))}

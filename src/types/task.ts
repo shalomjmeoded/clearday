@@ -13,6 +13,8 @@ export interface Task {
   dueDate?: string;
   reminderAt?: string;
   recurrence: TaskRecurrence;
+  /** Set on a logged completion of a repeating task: the id of the live task. */
+  recurringTaskId?: string;
   listId?: string;
   sortOrder: number;
   completedAt?: string;

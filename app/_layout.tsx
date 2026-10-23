@@ -1,7 +1,7 @@
 import { ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform, StyleSheet, useColorScheme } from 'react-native';
@@ -9,6 +9,8 @@ import 'react-native-reanimated';
 
 import { BootstrapScreen } from '@/components/layout/BootstrapScreen';
 import { ThemedRoot } from '@/components/layout/ThemedRoot';
+import { Toast } from '@/components/ui/Toast';
+import type { ReminderResponse } from '@/features/reminders/reminderService';
 import {
   SPLASH_BACKGROUND_DARK,
   SPLASH_BACKGROUND_LIGHT,
@@ -80,7 +82,7 @@ export default function RootLayout() {
 
         const [
           { initDatabase },
-          { initReminders },
+          { initReminders, syncScheduledReminders },
           { useSettingsStore },
           { useTaskStore },
           { useListStore },
@@ -98,6 +100,7 @@ export default function RootLayout() {
         await useTaskStore.getState().refreshAll();
         await useListStore.getState().refresh();
         void useProStore.getState().initializePurchases();
+        void syncScheduledReminders();
       } catch (error) {
         console.error('Do! bootstrap failed:', error);
       } finally {
@@ -115,11 +118,67 @@ export default function RootLayout() {
 
       if (wasBackground && nextState === 'active') {
         void useProStore.getState().refreshProStatus();
+        if (Platform.OS !== 'web') {
+          void import('@/features/reminders/reminderService').then(
+            ({ syncScheduledReminders }) => syncScheduledReminders()
+          );
+        }
       }
     });
 
     return () => subscription.remove();
   }, []);
+
+  // Tapping a reminder opens its task; also covers the notification that cold-started the app.
+  useEffect(() => {
+    if (!ready || Platform.OS === 'web') return;
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+
+    void import('@/features/reminders/reminderService').then(
+      async ({
+        addReminderResponseListener,
+        getLaunchReminderResponse,
+        snoozeReminder,
+        SNOOZE_MINUTES,
+      }) => {
+        const handle = async ({ taskId, action }: ReminderResponse) => {
+          const { useTaskStore } = await import('@/store/taskStore');
+          const { useToastStore } = await import('@/store/toastStore');
+
+          if (action === 'complete') {
+            await useTaskStore.getState().completeTask(taskId);
+            return;
+          }
+          if (action === 'snooze') {
+            const until = await snoozeReminder(taskId);
+            await useTaskStore.getState().refreshAll();
+            if (until) {
+              useToastStore
+                .getState()
+                .show(`Snoozed for ${SNOOZE_MINUTES} minutes`);
+            }
+            return;
+          }
+          router.push(`/task/${taskId}`);
+        };
+
+        const launch = await getLaunchReminderResponse();
+        if (cancelled) return;
+        if (launch) await handle(launch);
+        if (cancelled) return;
+        unsubscribe = await addReminderResponseListener((response) => {
+          void handle(response);
+        });
+        if (cancelled) unsubscribe?.();
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [ready]);
 
   return (
     <GestureHandlerRootView style={[styles.root, { backgroundColor: rootBackground }]}>
@@ -127,6 +186,7 @@ export default function RootLayout() {
         <ThemeProvider>
           <ThemedRoot>
             {ready ? <AppNavigator /> : <BootstrapScreen />}
+            {ready ? <Toast /> : null}
           </ThemedRoot>
         </ThemeProvider>
       </KeyboardProvider>

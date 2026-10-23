@@ -13,6 +13,7 @@ export function mapRowToTask(row: Record<string, unknown>): Task {
     dueDate: (row.dueDate as string) ?? undefined,
     reminderAt: (row.reminderAt as string) ?? undefined,
     recurrence,
+    recurringTaskId: (row.recurringTaskId as string) ?? undefined,
     listId: (row.listId as string) ?? undefined,
     sortOrder: row.sortOrder as number,
     completedAt: (row.completedAt as string) ?? undefined,

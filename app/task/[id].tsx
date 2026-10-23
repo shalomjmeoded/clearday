@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,19 +30,26 @@ import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
 import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
-import type { Task, TaskPriority } from '@/types/task';
+import type { Task, TaskPriority, UpdateTaskInput } from '@/types/task';
 import {
   formatRecurrenceLabel,
   isRecurring,
   RECURRENCE_OPTIONS,
+  shiftReminderToDueDate,
 } from '@/utils/recurrence';
-import { formatDisplayDate, formatTime } from '@/utils/dates';
+import { formatDisplayDate, formatTime, isToday, todayRange } from '@/utils/dates';
 import {
   buildReminderIso,
   getHoursMinutesFromIso,
+  isReminderOnDifferentDay,
+  isReminderPast,
 } from '@/utils/reminderTime';
 import { triggerLightHaptic, triggerSuccessHaptic } from '@/utils/haptics';
 import { paramString } from '@/utils/routeParams';
+import {
+  computeCompletionStats,
+  formatCompletionStats,
+} from '@/utils/streaks';
 import { tomorrowIso } from '@/utils/scheduleDates';
 
 const PRIORITIES: { key: TaskPriority; label: string }[] = [
@@ -84,6 +91,9 @@ export default function TaskDetailScreen() {
   const [titleError, setTitleError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const isPro = useProStore((s) => s.isPro);
+  const textRef = useRef({ title: '', notes: '', dirty: false });
+  const [completionSummary, setCompletionSummary] = useState('');
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
   const refreshViews = useCallback(
     async (previousListId?: string) => {
@@ -137,6 +147,7 @@ export default function TaskDetailScreen() {
         setTask(t);
         setTitle(t.title);
         setNotes(t.notes ?? '');
+        textRef.current = { title: t.title, notes: t.notes ?? '', dirty: false };
         setPriority(t.priority);
         setColor(t.color);
         setListId(t.listId ?? INBOX_LIST_ID);
@@ -150,40 +161,80 @@ export default function TaskDetailScreen() {
     });
   }, [taskId]);
 
-  const save = async () => {
-    if (!taskId) return;
-    const trimmed = title.trim();
+  /**
+   * Every edit writes through immediately; there is no Save step. Writes are
+   * chained so a field change and a blur-triggered text save cannot read the
+   * same row at once and overwrite each other.
+   */
+  const persist = useCallback(
+    (patch: UpdateTaskInput) => {
+      if (!taskId) return writeQueue.current;
+      writeQueue.current = writeQueue.current
+        .catch(() => {})
+        .then(async () => {
+          setSaving(true);
+          try {
+            await taskRepository.update(taskId, patch);
+            setTask((current) => (current ? { ...current, ...patch } : current));
+            await refreshViews(task?.listId);
+          } catch {
+            Alert.alert(
+              'Could not save',
+              'Something went wrong. Please try again.'
+            );
+          } finally {
+            setSaving(false);
+          }
+        });
+      return writeQueue.current;
+    },
+    [refreshViews, task?.listId, taskId]
+  );
+
+  // Text commits on blur and when leaving the screen, so typing is not
+  // interrupted by a write on every keystroke.
+  const commitText = useCallback(async () => {
+    const current = textRef.current;
+    if (!taskId || !current.dirty) return;
+    const trimmed = current.title.trim();
     if (!trimmed) {
-      setTitleError('Add a title to save this task.');
+      setTitleError('Add a title to keep this task.');
       return;
     }
     setTitleError(undefined);
-    Keyboard.dismiss();
-    setSaving(true);
+    textRef.current = { ...current, dirty: false };
+    await persist({ title: trimmed, notes: current.notes.trim() || undefined });
+  }, [persist, taskId]);
 
-    try {
-      const previousListId = task?.listId;
-      const resolvedPriority =
-        dueDate && priority === 'must_do_today' ? 'normal' : priority;
-
-      await taskRepository.update(taskId, {
-        title: trimmed,
-        notes: notes.trim() || undefined,
-        priority: resolvedPriority,
-        color,
-        listId,
-        dueDate: task?.status === 'active' ? dueDate : undefined,
-        reminderAt: task?.status === 'active' ? reminderAt : undefined,
-        recurrence: task?.status === 'active' ? recurrence : DEFAULT_RECURRENCE,
-      });
-      await refreshViews(previousListId);
-      router.back();
-    } catch {
-      Alert.alert('Could not save', 'Something went wrong. Please try again.');
-    } finally {
-      setSaving(false);
+  // Quiet history line for repeating tasks, from the logged occurrences.
+  useEffect(() => {
+    if (!taskId || !isRecurring(recurrence)) {
+      setCompletionSummary('');
+      return;
     }
-  };
+    let cancelled = false;
+    taskRepository.getOccurrences(taskId).then((occurrences) => {
+      if (cancelled) return;
+      const stats = computeCompletionStats(
+        occurrences.map((o) => o.dueDate),
+        recurrence
+      );
+      setCompletionSummary(formatCompletionStats(stats));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, recurrence, task?.dueDate]);
+
+  // Leaving the screen (back gesture, header button) still saves pending text.
+  const commitTextRef = useRef(commitText);
+  commitTextRef.current = commitText;
+  useEffect(
+    () => () => {
+      void commitTextRef.current();
+    },
+    []
+  );
 
   const archive = async () => {
     if (!taskId) return;
@@ -244,24 +295,45 @@ export default function TaskDetailScreen() {
       );
       return;
     }
+    const next = buildReminderIso(hours, minutes, dueDate);
+    if (isReminderPast(next)) {
+      Alert.alert(
+        'That time has passed',
+        dueDate
+          ? `${formatDisplayDate(dueDate)} at ${formatTime(next)} is already behind us. Pick a later time or move the due date.`
+          : 'Pick a later time.'
+      );
+      return;
+    }
     await triggerLightHaptic();
-    setReminderAt(buildReminderIso(hours, minutes, dueDate));
+    setReminderAt(next);
+    await persist({ reminderAt: next });
   };
 
   const removeReminder = async () => {
     Keyboard.dismiss();
     await triggerLightHaptic();
     setReminderAt(undefined);
+    await persist({ reminderAt: undefined });
+  };
+
+  /** Keep the unsaved reminder on the same clock time when the due day moves. */
+  const followDueDate = (nextDueDate: string) => {
+    setReminderAt((current) =>
+      current ? shiftReminderToDueDate(current, nextDueDate) : current
+    );
   };
 
   const scheduleTomorrow = async () => {
     if (!taskId) return;
     Keyboard.dismiss();
     await triggerLightHaptic();
-    setDueDate(tomorrowIso());
+    const next = tomorrowIso();
+    setDueDate(next);
+    followDueDate(next);
     if (priority === 'must_do_today') setPriority('normal');
-    await scheduleTask(taskId, tomorrowIso());
-    setTask((prev) => (prev ? { ...prev, dueDate: tomorrowIso(), priority: 'normal' } : prev));
+    await scheduleTask(taskId, next);
+    setTask((prev) => (prev ? { ...prev, dueDate: next, priority: 'normal' } : prev));
   };
 
   const pickDate = () => {
@@ -273,6 +345,7 @@ export default function TaskDetailScreen() {
     if (!taskId) return;
     await triggerLightHaptic();
     setDueDate(iso);
+    followDueDate(iso);
     if (priority === 'must_do_today') setPriority('normal');
     await scheduleTask(taskId, iso);
     setTask((prev) => (prev ? { ...prev, dueDate: iso, priority: 'normal' } : prev));
@@ -288,19 +361,26 @@ export default function TaskDetailScreen() {
     setTask((prev) => (prev ? { ...prev, dueDate: undefined } : prev));
   };
 
-  const reloadTask = async () => {
-    if (!taskId) return;
+  /** Returns false when the row no longer exists (e.g. a reopened repeat). */
+  const reloadTask = async (): Promise<boolean> => {
+    if (!taskId) return false;
     const updated = await taskRepository.getById(taskId);
-    if (!updated) return;
+    if (!updated) return false;
     setTask(updated);
     setTitle(updated.title);
     setNotes(updated.notes ?? '');
+    textRef.current = {
+      title: updated.title,
+      notes: updated.notes ?? '',
+      dirty: false,
+    };
     setPriority(updated.priority);
     setColor(updated.color);
     setListId(updated.listId ?? INBOX_LIST_ID);
     setReminderAt(updated.reminderAt);
     setDueDate(updated.dueDate);
     setRecurrence(updated.recurrence ?? DEFAULT_RECURRENCE);
+    return true;
   };
 
   const toggleDone = async () => {
@@ -314,8 +394,17 @@ export default function TaskDetailScreen() {
       await completeTask(taskId);
     }
     await refreshViews(task.listId);
-    await reloadTask();
+    // Reopening a logged repeat folds the record back into the live task,
+    // so there is nothing left to show here.
+    const stillThere = await reloadTask();
+    if (!stillThere) router.back();
   };
+
+  const reminderIsPast = task?.status === 'active' && isReminderPast(reminderAt);
+  // Show the day whenever it is not obvious: undated task, or reminder on another day.
+  const reminderShowsDay =
+    Boolean(reminderAt) &&
+    (!dueDate || isReminderOnDifferentDay(reminderAt, dueDate));
 
   if (!loaded) {
     return (
@@ -350,16 +439,22 @@ export default function TaskDetailScreen() {
           value={title}
           onChangeText={(v) => {
             setTitle(v);
+            textRef.current = { ...textRef.current, title: v, dirty: true };
             if (titleError && v.trim()) setTitleError(undefined);
           }}
+          onBlur={() => void commitText()}
           error={titleError}
-          returnKeyType="next"
+          returnKeyType="done"
         />
 
         <TextField
           label="Notes"
           value={notes}
-          onChangeText={setNotes}
+          onChangeText={(v) => {
+            setNotes(v);
+            textRef.current = { ...textRef.current, notes: v, dirty: true };
+          }}
+          onBlur={() => void commitText()}
           multiline
         />
 
@@ -372,8 +467,19 @@ export default function TaskDetailScreen() {
               key={p.key}
               onPress={async () => {
                 Keyboard.dismiss();
+                if (p.key === priority) return;
                 await triggerLightHaptic();
                 setPriority(p.key);
+                // "Must do today" and a later due date contradict each other,
+                // so choosing it pulls the task back to today.
+                if (p.key === 'must_do_today' && dueDate && !isToday(dueDate)) {
+                  const today = todayRange().start;
+                  setDueDate(today);
+                  followDueDate(today);
+                  await persist({ priority: p.key, dueDate: today });
+                  return;
+                }
+                await persist({ priority: p.key });
               }}
               style={[
                 styles.chip,
@@ -405,6 +511,7 @@ export default function TaskDetailScreen() {
               Keyboard.dismiss();
               await triggerLightHaptic();
               setColor(undefined);
+              await persist({ color: undefined });
             }}
             style={[
               styles.noColorSwatch,
@@ -423,6 +530,7 @@ export default function TaskDetailScreen() {
                 Keyboard.dismiss();
                 await triggerLightHaptic();
                 setColor(item.value);
+                await persist({ color: item.value });
               }}
               accessibilityRole="button"
               accessibilityLabel={`Choose ${item.label}`}
@@ -490,7 +598,7 @@ export default function TaskDetailScreen() {
               >
                 <Text style={{ color: tokens.accent, fontSize: 14 }}>Choose date</Text>
               </Pressable>
-              {dueDate ? (
+              {dueDate && !isRecurring(recurrence) ? (
                 <Pressable
                   onPress={clearDueDate}
                   style={[styles.chip, { borderColor: tokens.border, backgroundColor: tokens.card }]}
@@ -508,10 +616,19 @@ export default function TaskDetailScreen() {
               style={[styles.reminderBtn, { borderColor: tokens.border }]}
             >
               <Text style={[typography.body, { color: tokens.text }]}>
-                {reminderAt ? formatTime(reminderAt) : 'Set time'}
+                {reminderAt
+                  ? reminderShowsDay
+                    ? `${formatDisplayDate(reminderAt)} · ${formatTime(reminderAt)}`
+                    : formatTime(reminderAt)
+                  : 'Set time'}
               </Text>
               <Text style={[typography.meta, { color: tokens.mutedText }]}>›</Text>
             </Pressable>
+            {reminderIsPast ? (
+              <Text style={[typography.meta, styles.recurrenceHint, { color: tokens.danger }]}>
+                This time has already passed, so nothing will ring. Tap to pick a new one.
+              </Text>
+            ) : null}
             {reminderAt ? (
               <Pressable onPress={removeReminder} style={styles.removeReminder}>
                 <Text style={[typography.meta, { color: tokens.danger }]}>Remove reminder</Text>
@@ -521,11 +638,6 @@ export default function TaskDetailScreen() {
             <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
               REPEAT · {formatRecurrenceLabel(recurrence)}
             </Text>
-            {isRecurring(recurrence) && !dueDate ? (
-              <Text style={[typography.meta, styles.recurrenceHint, { color: tokens.mutedText }]}>
-                Set a due date above so repeats know when to start.
-              </Text>
-            ) : null}
             <View style={styles.row}>
               {RECURRENCE_OPTIONS.map((option) => (
                 <Pressable
@@ -545,6 +657,14 @@ export default function TaskDetailScreen() {
                     }
                     await triggerLightHaptic();
                     setRecurrence(option.key);
+                    // A repeat always has a start date; the repository fills
+                    // in today, so mirror that here rather than show "no date".
+                    if (option.key !== 'none' && !dueDate) {
+                      setDueDate(todayRange().start);
+                      await persist({ recurrence: option.key, dueDate: todayRange().start });
+                      return;
+                    }
+                    await persist({ recurrence: option.key });
                   }}
                   style={[
                     styles.chip,
@@ -573,6 +693,11 @@ export default function TaskDetailScreen() {
                 {dueDate ? ` · next due ${formatDisplayDate(dueDate)}` : ''}
               </Text>
             ) : null}
+            {completionSummary ? (
+              <Text style={[typography.meta, styles.recurrenceHint, { color: tokens.mutedText }]}>
+                {completionSummary}
+              </Text>
+            ) : null}
           </>
         )}
 
@@ -592,16 +717,19 @@ export default function TaskDetailScreen() {
         />
 
         <PrimaryButton
-          label={saving ? 'Saving…' : 'Save'}
-          onPress={save}
-          disabled={saving}
-        />
-
-        <PrimaryButton
           label={task.status === 'completed' ? 'Mark as to-do' : 'Mark done'}
           onPress={toggleDone}
-          variant="ghost"
         />
+
+        <Text
+          style={[
+            typography.meta,
+            styles.savedNote,
+            { color: tokens.mutedText },
+          ]}
+        >
+          {saving ? 'Saving…' : 'Changes save as you make them.'}
+        </Text>
 
         <View style={styles.destructiveSection}>
           <PrimaryButton label="Archive" onPress={archive} variant="ghost" />
@@ -689,6 +817,10 @@ const styles = StyleSheet.create({
   recurrenceHint: {
     marginBottom: spacing.sm,
     lineHeight: 18,
+  },
+  savedNote: {
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
   destructiveSection: {
     marginTop: spacing.xl,

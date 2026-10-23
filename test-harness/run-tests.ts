@@ -17,7 +17,7 @@ import {
 } from '@/features/backup/backupService';
 import { initDatabase } from '@/db/migrations';
 import { getDb, closeDb } from '@/db/client';
-import { INBOX_LIST_ID } from '@/db/constants';
+import { INBOX_LIST_ID, SCHEMA_VERSION } from '@/db/constants';
 import { CLEARDAY_BACKUP_VERSION } from '@/types/backup';
 
 import { __setPickerResult } from './stubs/expo-document-picker';
@@ -341,7 +341,7 @@ async function main() {
     ]);
   });
 
-  await test('settings: missing keys default, junk values sanitized, schemaVersion = 4', async () => {
+  await test('settings: missing keys default, junk values sanitized, schemaVersion current', async () => {
     await freshDb();
     const backup = validBackup({
       settings: {
@@ -362,7 +362,7 @@ async function main() {
     assert.equal(map.defaultListId, INBOX_LIST_ID, 'orphan defaultListId → inbox');
     assert.equal(map.colorTheme, 'classic', 'object value → default');
     assert.equal(map.completedTaskBehavior, 'collapse', 'missing key → default');
-    assert.equal(map.schemaVersion, '4');
+    assert.equal(map.schemaVersion, String(SCHEMA_VERSION));
   });
 
   await test('import without settings key at all uses full defaults', async () => {

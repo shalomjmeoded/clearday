@@ -16,7 +16,8 @@
       "expo-notifications": ["./stubs/expo-notifications.ts"],
       "expo-document-picker": ["./stubs/expo-document-picker.ts"],
       "expo-file-system/legacy": ["./stubs/expo-file-system-legacy.ts"],
-      "expo-sharing": ["./stubs/expo-sharing.ts"]
+      "expo-sharing": ["./stubs/expo-sharing.ts"],
+      "expo-router": ["./stubs/expo-router.ts"]
     }
   },
   "include": ["**/*.ts", "../src/**/*.ts"]

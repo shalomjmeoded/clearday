@@ -24,6 +24,37 @@ export interface ParsedTaskInput {
   recurrence?: TaskRecurrence;
 }
 
+export interface ParseTaskInputOptions {
+  /**
+   * When false, recurrence words ("daily", "weekly", …) stay in the title
+   * instead of being consumed. Used for free users so "Daily standup" is
+   * not silently turned into "standup".
+   */
+  allowRecurrence?: boolean;
+  /** Injectable clock for tests. */
+  now?: Date;
+}
+
+/**
+ * A recurrence word is only consumed when it reads as a modifier rather than
+ * part of the name. It qualifies as a modifier when it trails the phrase
+ * ("water plants weekly") or when enough words remain to still form a title
+ * ("review budget monthly with Sam"). A leading word on a short phrase stays
+ * put, so "Daily standup" keeps its name.
+ */
+const MIN_TITLE_WORDS_AFTER_RECURRENCE = 2;
+
+const RECURRENCE_KEYWORDS: Record<string, TaskRecurrence> = {
+  daily: 'daily',
+  everyday: 'daily',
+  weekly: 'weekly',
+  biweekly: 'biweekly',
+  fortnightly: 'biweekly',
+  monthly: 'monthly',
+  yearly: 'yearly',
+  annually: 'yearly',
+};
+
 const WEEKDAYS: Record<string, (date: Date) => Date> = {
   monday: nextMonday,
   tuesday: nextTuesday,
@@ -57,7 +88,12 @@ function parseTimeToken(
   return undefined;
 }
 
-export function parseTaskInput(raw: string): ParsedTaskInput {
+export function parseTaskInput(
+  raw: string,
+  options: ParseTaskInputOptions = {}
+): ParsedTaskInput {
+  const allowRecurrence = options.allowRecurrence ?? true;
+  const now = options.now ?? new Date();
   let text = raw.trim();
   let priority: TaskPriority = 'normal';
   let dueDate: Date | undefined;
@@ -75,9 +111,14 @@ export function parseTaskInput(raw: string): ParsedTaskInput {
 
   const tokens = text.split(/\s+/);
   const kept: string[] = [];
-  let baseDay = startOfDay(new Date());
+  let recurrenceCandidate:
+    | { recurrence: TaskRecurrence; keptIndex: number }
+    | undefined;
+  let baseDay = startOfDay(now);
+  let explicitDay = false;
 
-  for (const token of tokens) {
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
     const lower = token.toLowerCase();
 
     if (lower === 'p1' || lower === 'p0') {
@@ -92,37 +133,37 @@ export function parseTaskInput(raw: string): ParsedTaskInput {
       listHint = token.slice(1);
       continue;
     }
-    if (lower === 'daily' || lower === 'everyday') {
-      recurrence = 'daily';
-      continue;
-    }
-    if (lower === 'weekly') {
-      recurrence = 'weekly';
-      continue;
-    }
-    if (lower === 'monthly') {
-      recurrence = 'monthly';
-      continue;
-    }
-    if (lower === 'yearly' || lower === 'annually') {
-      recurrence = 'yearly';
+    if (allowRecurrence && RECURRENCE_KEYWORDS[lower]) {
+      if (index === tokens.length - 1) {
+        recurrence = RECURRENCE_KEYWORDS[lower];
+        continue;
+      }
+      // Decide once the rest of the title is known.
+      recurrenceCandidate = {
+        recurrence: RECURRENCE_KEYWORDS[lower],
+        keptIndex: kept.length,
+      };
+      kept.push(token);
       continue;
     }
 
     if (lower === 'today') {
-      baseDay = startOfDay(new Date());
+      baseDay = startOfDay(now);
       dueDate = baseDay;
+      explicitDay = true;
       continue;
     }
     if (lower === 'tonight') {
-      baseDay = startOfDay(new Date());
+      baseDay = startOfDay(now);
       dueDate = baseDay;
+      explicitDay = true;
       reminderAt = setHours(setMinutes(baseDay, 0), 20);
       continue;
     }
     if (lower === 'tomorrow') {
-      baseDay = startOfDay(addDays(new Date(), 1));
+      baseDay = startOfDay(addDays(now, 1));
       dueDate = baseDay;
+      explicitDay = true;
       continue;
     }
     const inMatch = lower.match(/^in(\d+)(d|days|w|weeks|m|months)$/);
@@ -132,28 +173,43 @@ export function parseTaskInput(raw: string): ParsedTaskInput {
       let days = n;
       if (unit.startsWith('w')) days = n * 7;
       if (unit.startsWith('m')) days = n * 30;
-      baseDay = startOfDay(addDays(new Date(), days));
+      baseDay = startOfDay(addDays(now, days));
       dueDate = baseDay;
+      explicitDay = true;
       continue;
     }
     if (WEEKDAYS[lower]) {
-      baseDay = startOfDay(WEEKDAYS[lower](new Date()));
+      baseDay = startOfDay(WEEKDAYS[lower](now));
       dueDate = baseDay;
+      explicitDay = true;
       continue;
     }
 
-    const time = parseTimeToken(token, baseDay);
+    let time = parseTimeToken(token, baseDay);
     if (time) {
+      // A bare time that has already passed today means tomorrow
+      // ("call Bob 8am" typed at 10am). An explicit day is respected as-is.
+      if (!explicitDay && time.getTime() <= now.getTime()) {
+        time = addDays(time, 1);
+      }
       reminderAt = time;
-      if (!dueDate) dueDate = startOfDay(time);
+      if (!dueDate || !explicitDay) dueDate = startOfDay(time);
       continue;
     }
 
     kept.push(token);
   }
 
+  if (
+    recurrenceCandidate &&
+    kept.length - 1 >= MIN_TITLE_WORDS_AFTER_RECURRENCE
+  ) {
+    kept.splice(recurrenceCandidate.keptIndex, 1);
+    recurrence = recurrenceCandidate.recurrence;
+  }
+
   if (priority === 'must_do_today' && !dueDate) {
-    dueDate = startOfDay(new Date());
+    dueDate = startOfDay(now);
   }
 
   return {

@@ -1,17 +1,26 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
 import { CalendarDatePicker } from '@/components/tasks/CalendarDatePicker';
 import { QuickTimePicker } from '@/components/tasks/QuickTimePicker';
+import { RecurrencePicker } from '@/components/tasks/RecurrencePicker';
 import { TaskColorPicker } from '@/components/tasks/TaskColorPicker';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
+import {
+  areLocalNotificationsSupported,
+  requestReminderPermission,
+} from '@/features/reminders/reminderService';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useProStore } from '@/store/proStore';
 import type { QuickAddOptions } from '@/types/quickAdd';
+import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
+import { isRecurring } from '@/utils/recurrence';
 import { todayRange, tomorrowRange } from '@/utils/dates';
+import { router } from 'expo-router';
 import { triggerLightHaptic, triggerSelectionHaptic } from '@/utils/haptics';
 
 import { useScreenInsets } from './useScreenInsets';
@@ -58,16 +67,20 @@ export function BottomInputBar({
   const [draftReminderAt, setDraftReminderAt] = useState<string | undefined>();
   const [draftColor, setDraftColor] = useState<string | null | undefined>();
   const [draftPinned, setDraftPinned] = useState(false);
+  const [draftRecurrence, setDraftRecurrence] =
+    useState<TaskRecurrence>(DEFAULT_RECURRENCE);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showTime, setShowTime] = useState(false);
   const [showColor, setShowColor] = useState(false);
+  const [showRecurrence, setShowRecurrence] = useState(false);
+  const isPro = useProStore((s) => s.isPro);
   const localInputRef = useRef<TextInput>(null);
   const pickerOpenRef = useRef(false);
   const suppressBlurRef = useRef(false);
   const submitDismissRef = useRef(false);
   const draftActiveRef = useRef(false);
 
-  const pickerOpen = showCalendar || showTime || showColor;
+  const pickerOpen = showCalendar || showTime || showColor || showRecurrence;
   pickerOpenRef.current = pickerOpen;
 
   draftActiveRef.current =
@@ -75,6 +88,7 @@ export function BottomInputBar({
     draftReminderAt != null ||
     draftColor != null ||
     draftPinned ||
+    isRecurring(draftRecurrence) ||
     Boolean(text.trim());
 
   const hasDraftContent =
@@ -82,7 +96,8 @@ export function BottomInputBar({
     draftDatePick != null ||
     draftReminderAt != null ||
     draftColor != null ||
-    draftPinned;
+    draftPinned ||
+    isRecurring(draftRecurrence);
 
   const focusInput = useCallback(() => {
     setTimeout(() => {
@@ -125,12 +140,19 @@ export function BottomInputBar({
     focusInput();
   }, [focusInput]);
 
+  const closeRecurrence = useCallback(() => {
+    pickerOpenRef.current = false;
+    setShowRecurrence(false);
+    focusInput();
+  }, [focusInput]);
+
   const resetDraft = () => {
     setDraftDatePick(null);
     setDraftDueDate(undefined);
     setDraftReminderAt(undefined);
     setDraftColor(undefined);
     setDraftPinned(false);
+    setDraftRecurrence(DEFAULT_RECURRENCE);
   };
 
   const clearDatePick = () => {
@@ -151,6 +173,7 @@ export function BottomInputBar({
     if (draftReminderAt) options.reminderAt = draftReminderAt;
     if (draftColor !== undefined) options.color = draftColor;
     if (draftPinned) options.priority = 'must_do_today';
+    if (isRecurring(draftRecurrence)) options.recurrence = draftRecurrence;
     onSubmit(trimmed, Object.keys(options).length > 0 ? options : undefined);
     setText('');
     resetDraft();
@@ -194,6 +217,24 @@ export function BottomInputBar({
   const openTime = async () => {
     beginToolbarAction();
     await triggerSelectionHaptic();
+    // Ask up front so a denied permission never leaves a reminder that can't ring.
+    if (!areLocalNotificationsSupported()) {
+      Alert.alert(
+        'Reminders',
+        'Local reminders need a development build on Android. The task will still save without one.'
+      );
+      focusInput();
+      return;
+    }
+    const granted = await requestReminderPermission();
+    if (!granted) {
+      Alert.alert(
+        'Notifications off',
+        'Reminders need notification permission. You can turn it on in Settings → Reminders.'
+      );
+      focusInput();
+      return;
+    }
     pickerOpenRef.current = true;
     setShowTime(true);
   };
@@ -203,6 +244,20 @@ export function BottomInputBar({
     await triggerSelectionHaptic();
     setDraftPinned((value) => !value);
     focusInput();
+  };
+
+  const openRecurrence = async () => {
+    beginToolbarAction();
+    await triggerSelectionHaptic();
+    if (!isPro) {
+      Alert.alert('Do! Pro', 'Repeating tasks are included with Pro.', [
+        { text: 'Not now', style: 'cancel', onPress: () => focusInput() },
+        { text: 'View Pro', onPress: () => router.push('/pro') },
+      ]);
+      return;
+    }
+    pickerOpenRef.current = true;
+    setShowRecurrence(true);
   };
 
   const openColor = async () => {
@@ -274,6 +329,12 @@ export function BottomInputBar({
             icon="pin-outline"
             active={draftPinned}
             onPress={togglePin}
+            tokens={tokens}
+          />
+          <ToolbarBtn
+            icon="repeat-outline"
+            active={isRecurring(draftRecurrence)}
+            onPress={openRecurrence}
             tokens={tokens}
           />
           <ToolbarBtn
@@ -378,6 +439,15 @@ export function BottomInputBar({
             setDraftDatePick('pick');
             setDraftDueDate(dueDate);
           }
+          focusInput();
+        }}
+      />
+      <RecurrencePicker
+        visible={showRecurrence}
+        selected={draftRecurrence}
+        onClose={closeRecurrence}
+        onSelect={(recurrence) => {
+          setDraftRecurrence(recurrence);
           focusInput();
         }}
       />

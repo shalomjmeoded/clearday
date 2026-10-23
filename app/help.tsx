@@ -19,7 +19,17 @@ const SECTIONS = [
   {
     title: 'Dates & reminders',
     body:
-      'Type naturally when adding tasks:\n\n• “Call Daniel tomorrow 10am”\n• “Pay rent Friday”\n• “Gym today 18:00”\n\nToolbar selections override parsed dates.',
+      'Type naturally when adding tasks:\n\n• “Call Daniel tomorrow 10am”\n• “Pay rent Friday”\n• “Gym today 18:00”\n\nA bare time that has already passed means tomorrow. Toolbar selections override parsed dates. Moving a task to another day moves its reminder with it.',
+  },
+  {
+    title: 'Repeating tasks (Pro)',
+    body:
+      'Add “daily”, “weekly”, “biweekly”, “monthly”, or “yearly” to a new task, or use the repeat button in quick add. Marking a repeat done moves it to its next date and files that occurrence under Finished Tasks; a banner lets you undo.',
+  },
+  {
+    title: 'From the notification',
+    body:
+      'A reminder carries two buttons. Complete ticks the task off without opening the app, and Snooze 1 Hour pushes it back. Tapping the notification itself opens the task.',
   },
   {
     title: 'Pinning important tasks',

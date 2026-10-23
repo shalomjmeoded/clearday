@@ -132,6 +132,32 @@ async function migrateToV4(db: Awaited<ReturnType<typeof getDb>>): Promise<void>
   );
 }
 
+/** v5 links a logged completion back to the repeating task it came from. */
+async function migrateToV5(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
+  const row = await db.getFirstAsync<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'schemaVersion'"
+  );
+  const version = parseInt(row?.value ?? '1', 10);
+
+  const columns = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(tasks)'
+  );
+  if (!columns.some((c) => c.name === 'recurringTaskId')) {
+    await db.execAsync('ALTER TABLE tasks ADD COLUMN recurringTaskId TEXT');
+  }
+  // Created here rather than in MIGRATION_SQL: on an existing install the
+  // column does not exist yet when that script runs.
+  await db.execAsync(
+    'CREATE INDEX IF NOT EXISTS idx_tasks_recurringTaskId ON tasks(recurringTaskId)'
+  );
+  if (version >= 5) return;
+
+  await db.runAsync(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('schemaVersion', ?)",
+    [String(SCHEMA_VERSION)]
+  );
+}
+
 export async function initDatabase(): Promise<void> {
   const db = await getDb();
   await db.execAsync(MIGRATION_SQL);
@@ -139,4 +165,5 @@ export async function initDatabase(): Promise<void> {
   await migrateToV2(db);
   await migrateToV3(db);
   await migrateToV4(db);
+  await migrateToV5(db);
 }

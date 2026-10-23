@@ -31,3 +31,13 @@ export const Alert = {
 };
 
 export const Platform = { OS: 'ios' as const };
+
+/** react-native-purchases probes these at import time. */
+export const NativeModules: Record<string, unknown> = {};
+
+export class NativeEventEmitter {
+  addListener(): { remove: () => void } {
+    return { remove: () => {} };
+  }
+  removeAllListeners(): void {}
+}

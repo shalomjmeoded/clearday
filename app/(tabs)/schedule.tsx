@@ -9,6 +9,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { TaskList } from '@/components/tasks/TaskList';
 import type { QuickAddOptions } from '@/types/quickAdd';
 import type { Task } from '@/types/task';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { dayIso } from '@/utils/scheduleDates';
 import { triggerSuccessHaptic, triggerLightHaptic } from '@/utils/haptics';
@@ -16,6 +17,7 @@ import { triggerSuccessHaptic, triggerLightHaptic } from '@/utils/haptics';
 export default function ScheduleScreen() {
   const addInputRef = useRef<TextInput | null>(null);
   const [segment, setSegment] = useState('tomorrow');
+  const defaultListId = useSettingsStore((s) => s.settings.defaultListId);
   const tomorrowTasks = useTaskStore((s) => s.tomorrowTasks);
   const tomorrowCompletedTasks = useTaskStore((s) => s.tomorrowCompletedTasks);
   const laterTasks = useTaskStore((s) => s.laterTasks);
@@ -66,7 +68,12 @@ export default function ScheduleScreen() {
   const handleAdd = async (text: string, options?: QuickAddOptions) => {
     const defaultDueDate =
       segment === 'tomorrow' ? dayIso(1) : dayIso(7);
-    const created = await addTask(text, undefined, { ...options, defaultDueDate });
+    // Use the same list as Today, so a task added here is not stranded in
+    // Inbox and invisible on a list-scoped Today.
+    const created = await addTask(text, defaultListId, {
+      ...options,
+      defaultDueDate,
+    });
     if (!created) {
       Alert.alert('Could not add task', 'Please try again.');
     }

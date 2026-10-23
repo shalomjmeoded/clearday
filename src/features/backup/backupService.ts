@@ -130,6 +130,7 @@ function normalizeTask(
     dueDate: asOptionalString(task.dueDate),
     reminderAt: asOptionalString(task.reminderAt),
     recurrence: oneOf(task.recurrence, VALID_RECURRENCES, DEFAULT_RECURRENCE),
+    recurringTaskId: asOptionalString(task.recurringTaskId),
     listId: listId && knownListIds.has(listId) ? listId : INBOX_LIST_ID,
     sortOrder: typeof task.sortOrder === 'number' ? task.sortOrder : 0,
     completedAt: asOptionalString(task.completedAt),
@@ -200,6 +201,14 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
     seenIds.add(task.id);
   }
 
+  // A completion record pointing at a task that is not in the backup becomes
+  // a plain completed task rather than an unreachable orphan.
+  for (const task of tasks) {
+    if (task.recurringTaskId && !seenIds.has(task.recurringTaskId)) {
+      task.recurringTaskId = undefined;
+    }
+  }
+
   // Capture before the wipe so the pre-import OS notifications can be
   // cancelled after the restore commits (never before — a failed import
   // must leave existing reminders untouched).
@@ -231,8 +240,8 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
 
     for (const task of tasks) {
       await db.runAsync(
-        `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, recurringTaskId, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           task.id,
           task.title,
@@ -243,6 +252,7 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
           task.dueDate ?? null,
           task.reminderAt ?? null,
           task.recurrence,
+          task.recurringTaskId ?? null,
           task.listId ?? INBOX_LIST_ID,
           task.sortOrder,
           task.completedAt ?? null,

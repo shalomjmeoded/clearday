@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Alert, StyleSheet, Text } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, AppState, Linking, StyleSheet, Text } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { FormScreen } from '@/components/layout/FormScreen';
@@ -20,6 +20,12 @@ import {
   runExportWithFeedback,
   runImportWithFeedback,
 } from '@/features/backup/backupService';
+import {
+  getReminderPermissionStatus,
+  requestReminderPermission,
+  syncScheduledReminders,
+  type ReminderPermissionStatus,
+} from '@/features/reminders/reminderService';
 import { useTheme } from '@/theme/ThemeProvider';
 import type {
   ColorTheme,
@@ -73,6 +79,48 @@ export default function SettingsScreen() {
   const defaultTime = parseTimeKey(settings.defaultReminderTime);
   const [pickerHours, setPickerHours] = useState(defaultTime.hours);
   const [pickerMinutes, setPickerMinutes] = useState(defaultTime.minutes);
+  const [reminderPermission, setReminderPermission] =
+    useState<ReminderPermissionStatus | null>(null);
+
+  const refreshPermission = useCallback(async () => {
+    setReminderPermission(await getReminderPermissionStatus());
+  }, []);
+
+  // Re-check when coming back from the OS settings app.
+  useEffect(() => {
+    void refreshPermission();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshPermission();
+    });
+    return () => subscription.remove();
+  }, [refreshPermission]);
+
+  const handlePermissionRow = async () => {
+    await triggerSelectionHaptic();
+    if (reminderPermission === 'undetermined') {
+      const granted = await requestReminderPermission();
+      if (granted) void syncScheduledReminders();
+      await refreshPermission();
+      return;
+    }
+    if (reminderPermission === 'denied') {
+      Alert.alert(
+        'Notifications are off',
+        'Turn them on in the system settings so reminders can ring.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => void Linking.openSettings() },
+        ]
+      );
+    }
+  };
+
+  const permissionLabel: Record<ReminderPermissionStatus, string> = {
+    granted: 'Allowed',
+    denied: 'Off',
+    undetermined: 'Not asked yet',
+    unsupported: 'Unavailable',
+  };
 
   const update = async <K extends keyof typeof settings>(
     key: K,
@@ -169,8 +217,18 @@ export default function SettingsScreen() {
         </SettingsGroup>
 
         <SettingsGroup title="Reminders">
+          <SettingsRow
+            label="Notifications"
+            value={reminderPermission ? permissionLabel[reminderPermission] : undefined}
+            valueMuted={reminderPermission !== 'granted'}
+            onPress={
+              reminderPermission === 'denied' || reminderPermission === 'undetermined'
+                ? handlePermissionRow
+                : undefined
+            }
+          />
           <Text style={[typography.meta, styles.hint, { color: tokens.mutedText }]}>
-            Default reminder time for new tasks
+            Starting time when you add a reminder
           </Text>
           <SettingsRow
             label="Time"

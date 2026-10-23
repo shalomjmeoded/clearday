@@ -17,9 +17,19 @@ import type { Task } from '@/types/task';
 import { INBOX_LIST_ID } from '@/db/constants';
 import { listRepository } from '@/features/lists/listRepository';
 import { getIsPro } from '@/store/proStore';
-import { useSettingsStore } from '@/store/settingsStore';
+import { useToastStore } from '@/store/toastStore';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
+import { formatDisplayDate } from '@/utils/dates';
 import { isRecurring } from '@/utils/recurrence';
+
+/** Lets the checkmark finish before a recurring row is replaced by its next date. */
+const RECURRING_ADVANCE_DELAY_MS = 260;
+
+/**
+ * Completions in progress. A second tap on the same row while the first is
+ * still writing would otherwise log a second occurrence and advance twice.
+ */
+const completing = new Set<string>();
 
 function patchTaskInState(
   set: (
@@ -101,6 +111,77 @@ async function refreshAfterMutation(
   ]);
   if (listId) {
     await get().refreshList(listId);
+  }
+}
+
+
+async function completeTaskInner(
+  id: string,
+  set: (
+    partial:
+      | Partial<TaskState>
+      | ((state: TaskState) => Partial<TaskState>)
+  ) => void,
+  get: () => TaskState
+): Promise<void> {
+  const existing = await taskRepository.getById(id);
+  if (!existing) return;
+
+  if (!isRecurring(existing.recurrence)) {
+    const completedAt = new Date().toISOString();
+    set((state) => ({
+      todayTasks: state.todayTasks.filter((task) => task.id !== id),
+      tomorrowTasks: state.tomorrowTasks.filter((task) => task.id !== id),
+      laterTasks: state.laterTasks.filter((task) => task.id !== id),
+      listTasks: state.listTasks.filter((task) => task.id !== id),
+      todayCompletedTasks: [
+        { ...existing, status: 'completed', completedAt },
+        ...state.todayCompletedTasks.filter((task) => task.id !== id),
+      ],
+    }));
+  }
+
+  if (isRecurring(existing.recurrence)) {
+    // Show the tick on the current row, then let the refresh swap in the
+    // next occurrence — instead of the row vanishing mid-tap.
+    patchTaskInState(set, id, {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+    });
+    await new Promise((resolve) =>
+      setTimeout(resolve, RECURRING_ADVANCE_DELAY_MS)
+    );
+  }
+
+  const { task: result, occurrenceId } = await taskRepository.complete(id);
+  await refreshAfterMutation(get, existing?.listId);
+  await get().refreshDone();
+
+  if (isRecurring(existing.recurrence) && result?.dueDate) {
+    // The row has moved to its next date; say so and offer a way back.
+    const previous = {
+      dueDate: existing.dueDate,
+      reminderAt: existing.reminderAt,
+      priority: existing.priority,
+    };
+    useToastStore.getState().show(
+      `Done · next ${formatDisplayDate(result.dueDate)}`,
+      {
+        action: {
+          label: 'Undo',
+          onPress: async () => {
+            // Undo must also remove the occurrence that was just logged,
+            // otherwise the repeat leaves a phantom entry in Finished.
+            if (occurrenceId) {
+              await taskRepository.deletePermanent(occurrenceId);
+            }
+            await taskRepository.update(id, previous);
+            await refreshAfterMutation(get, existing.listId);
+            await get().refreshDone();
+          },
+        },
+      }
+    );
   }
 }
 
@@ -192,8 +273,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     let color: string | undefined;
     let targetListId = listId;
 
+    const isPro = getIsPro();
+
     try {
-      const parsed = parseTaskInput(trimmed);
+      // Free users keep recurrence words in the title rather than losing them.
+      const parsed = parseTaskInput(trimmed, { allowRecurrence: isPro });
       title = parsed.title || trimmed;
       priority = parsed.priority;
       dueDate = parsed.dueDate ?? dueDate;
@@ -224,8 +308,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       color = options.color ?? undefined;
     }
     if (options?.priority) priority = options.priority;
+    if (options?.recurrence !== undefined) recurrence = options.recurrence;
 
-    const isPro = getIsPro();
     if (recurrence && isRecurring(recurrence) && !isPro) {
       recurrence = DEFAULT_RECURRENCE;
     }
@@ -248,26 +332,13 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   completeTask: async (id) => {
-    const existing = await taskRepository.getById(id);
-    if (!existing) return;
-
-    if (!isRecurring(existing.recurrence)) {
-      const completedAt = new Date().toISOString();
-      set((state) => ({
-        todayTasks: state.todayTasks.filter((task) => task.id !== id),
-        tomorrowTasks: state.tomorrowTasks.filter((task) => task.id !== id),
-        laterTasks: state.laterTasks.filter((task) => task.id !== id),
-        listTasks: state.listTasks.filter((task) => task.id !== id),
-        todayCompletedTasks: [
-          { ...existing, status: 'completed', completedAt },
-          ...state.todayCompletedTasks.filter((task) => task.id !== id),
-        ],
-      }));
+    if (completing.has(id)) return;
+    completing.add(id);
+    try {
+      await completeTaskInner(id, set, get);
+    } finally {
+      completing.delete(id);
     }
-
-    await taskRepository.complete(id);
-    await refreshAfterMutation(get, existing?.listId);
-    await get().refreshDone();
   },
 
   uncompleteTask: async (id) => {
@@ -311,7 +382,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   toggleRecurring: async (id) => {
     const isPro = getIsPro();
     const existing = await taskRepository.getById(id);
-    if (!existing) return;
+    // Repeating only makes sense for open tasks; completed rows ignore the action.
+    if (!existing || existing.status !== 'active') return;
 
     if (isRecurring(existing.recurrence)) {
       patchTaskInState(set, id, { recurrence: DEFAULT_RECURRENCE });

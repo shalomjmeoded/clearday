@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   dueDate TEXT,
   reminderAt TEXT,
   recurrence TEXT NOT NULL DEFAULT 'none',
+  recurringTaskId TEXT,
   listId TEXT,
   sortOrder INTEGER NOT NULL DEFAULT 0,
   completedAt TEXT,
