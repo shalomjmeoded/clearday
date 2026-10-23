@@ -163,6 +163,22 @@ export async function cancelReminderForTask(taskId: string): Promise<void> {
   }
 }
 
+/** Cancels already-scheduled OS notifications by id (e.g. after a backup restore replaced the reminders table). */
+export async function cancelScheduledNotifications(
+  notificationIds: string[]
+): Promise<void> {
+  if (notificationIds.length === 0) return;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return;
+  for (const notificationId of notificationIds) {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export async function initReminders(): Promise<void> {
   const Notifications = await loadNotifications();
   if (Notifications) {

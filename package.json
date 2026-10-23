@@ -9,6 +9,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
+    "test:backup": "node --import tsx --import ./test-harness/loader.mjs --require ./test-harness/register-cjs.cjs test-harness/run-tests.ts",
     "check:release": "npx expo install --check && npx tsc --noEmit && npx expo config --type public",
     "build:ios:production": "npx eas-cli build --platform ios --profile production",
     "build:ios:production:submit": "npx eas-cli build --platform ios --profile production --auto-submit",
@@ -53,6 +54,7 @@
   "devDependencies": {
     "@types/react": "~19.1.0",
     "react-test-renderer": "19.1.0",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.2"
   },
   "private": true

@@ -13,7 +13,13 @@ import {
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useListStore } from '@/store/listStore';
+import { useTaskStore } from '@/store/taskStore';
 import { useProStore } from '@/store/proStore';
+import {
+  runExportWithFeedback,
+  runImportWithFeedback,
+} from '@/features/backup/backupService';
 import { useTheme } from '@/theme/ThemeProvider';
 import type {
   ColorTheme,
@@ -63,6 +69,7 @@ export default function SettingsScreen() {
   const isPro = useProStore((s) => s.isPro);
   const setSetting = useSettingsStore((s) => s.setSetting);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null);
   const defaultTime = parseTimeKey(settings.defaultReminderTime);
   const [pickerHours, setPickerHours] = useState(defaultTime.hours);
   const [pickerMinutes, setPickerMinutes] = useState(defaultTime.minutes);
@@ -195,6 +202,42 @@ export default function SettingsScreen() {
           <Text style={[typography.meta, styles.hint, { color: tokens.mutedText }]}>
             {BACKUP_SECTION_BODY}
           </Text>
+          <SettingsRow
+            label="Export Backup"
+            value={backupBusy === 'export' ? 'Exporting…' : undefined}
+            valueMuted
+            disabled={backupBusy !== null}
+            onPress={() =>
+              void (async () => {
+                await triggerSelectionHaptic();
+                setBackupBusy('export');
+                try {
+                  await runExportWithFeedback();
+                } finally {
+                  setBackupBusy(null);
+                }
+              })()
+            }
+          />
+          <SettingsRow
+            label="Import Backup"
+            value={backupBusy === 'import' ? 'Importing…' : undefined}
+            valueMuted
+            disabled={backupBusy !== null}
+            onPress={() =>
+              void (async () => {
+                await triggerSelectionHaptic();
+                await runImportWithFeedback(
+                  async () => {
+                    await useSettingsStore.getState().hydrate();
+                    await useListStore.getState().refresh();
+                    await useTaskStore.getState().refreshAll();
+                  },
+                  (busy) => setBackupBusy(busy ? 'import' : null)
+                );
+              })()
+            }
+          />
           <SettingsRow
             label="Cloud Sync"
             value="Coming later"

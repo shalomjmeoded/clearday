@@ -10,7 +10,4 @@ export type ClearDayBackup = {
   settings: Record<string, unknown>;
 };
 
-/** Future backup file name for share/save dialogs. */
-export const CLEARDAY_BACKUP_FILENAME = 'clearday-backup.clearday';
-
 export const CLEARDAY_BACKUP_VERSION = 1;

@@ -3,17 +3,20 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
 
-import { INBOX_LIST_ID } from '@/db/constants';
+import { INBOX_LIST_ID, SCHEMA_VERSION } from '@/db/constants';
 import { getDb } from '@/db/client';
 import { mapRowToTask } from '@/features/tasks/taskMapper';
-import { scheduleReminderForTask } from '@/features/reminders/reminderService';
-import { DEFAULT_RECURRENCE } from '@/types/recurrence';
+import {
+  cancelScheduledNotifications,
+  scheduleReminderForTask,
+} from '@/features/reminders/reminderService';
+import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
 import type { ClearDayBackup } from '@/types/backup';
 import {
   CLEARDAY_BACKUP_VERSION,
 } from '@/types/backup';
 import type { TaskList } from '@/types/list';
-import type { Task } from '@/types/task';
+import type { Task, TaskPriority, TaskStatus } from '@/types/task';
 import { DEFAULT_SETTINGS, type AppSettings } from '@/types/settings';
 import { nowIso } from '@/utils/dates';
 
@@ -74,11 +77,86 @@ function parseBackupJson(raw: string): ClearDayBackup {
   return parsed;
 }
 
-function normalizeTask(task: Task): Task {
+const VALID_STATUSES: readonly TaskStatus[] = ['active', 'completed', 'archived'];
+const VALID_PRIORITIES: readonly TaskPriority[] = [
+  'normal',
+  'important',
+  'must_do_today',
+];
+const VALID_RECURRENCES: readonly TaskRecurrence[] = [
+  'none',
+  'daily',
+  'weekly',
+  'biweekly',
+  'monthly',
+  'yearly',
+];
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+/** Validates one imported task: structural fields must be present; enum-like fields fall back to safe defaults. */
+function normalizeTask(
+  task: Task,
+  index: number,
+  knownListIds: Set<string>
+): Task {
+  if (typeof task !== 'object' || task === null) {
+    throw new Error(`Backup task #${index + 1} is not valid.`);
+  }
+  const id = asOptionalString(task.id);
+  const title = asOptionalString(task.title);
+  if (!id || !title) {
+    throw new Error(`Backup task #${index + 1} is missing its id or title.`);
+  }
+  const now = nowIso();
+  const listId = asOptionalString(task.listId);
   return {
-    ...task,
-    recurrence: task.recurrence ?? DEFAULT_RECURRENCE,
-    listId: task.listId ?? INBOX_LIST_ID,
+    id,
+    title,
+    notes: asOptionalString(task.notes),
+    status: oneOf(task.status, VALID_STATUSES, 'active'),
+    priority: oneOf(task.priority, VALID_PRIORITIES, 'normal'),
+    color: asOptionalString(task.color),
+    dueDate: asOptionalString(task.dueDate),
+    reminderAt: asOptionalString(task.reminderAt),
+    recurrence: oneOf(task.recurrence, VALID_RECURRENCES, DEFAULT_RECURRENCE),
+    listId: listId && knownListIds.has(listId) ? listId : INBOX_LIST_ID,
+    sortOrder: typeof task.sortOrder === 'number' ? task.sortOrder : 0,
+    completedAt: asOptionalString(task.completedAt),
+    createdAt: asOptionalString(task.createdAt) ?? now,
+    updatedAt: asOptionalString(task.updatedAt) ?? now,
+    deletedAt: asOptionalString(task.deletedAt),
+  };
+}
+
+function normalizeList(list: TaskList, index: number): TaskList {
+  if (typeof list !== 'object' || list === null) {
+    throw new Error(`Backup list #${index + 1} is not valid.`);
+  }
+  const id = asOptionalString(list.id);
+  const name = asOptionalString(list.name);
+  if (!id || !name) {
+    throw new Error(`Backup list #${index + 1} is missing its id or name.`);
+  }
+  const now = nowIso();
+  return {
+    id,
+    name,
+    color: asOptionalString(list.color),
+    sortOrder: typeof list.sortOrder === 'number' ? list.sortOrder : 0,
+    createdAt: asOptionalString(list.createdAt) ?? now,
+    updatedAt: asOptionalString(list.updatedAt) ?? now,
+    deletedAt: asOptionalString(list.deletedAt),
   };
 }
 
@@ -100,8 +178,34 @@ function ensureInboxList(lists: TaskList[]): TaskList[] {
 
 async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
   const db = await getDb();
-  const lists = ensureInboxList(backup.lists);
-  const tasks = backup.tasks.map(normalizeTask);
+  const lists = ensureInboxList(
+    backup.lists.map((list, index) => normalizeList(list, index))
+  );
+  const knownListIds = new Set<string>();
+  for (const list of lists) {
+    if (knownListIds.has(list.id)) {
+      throw new Error(`Backup contains duplicate list id "${list.id}".`);
+    }
+    knownListIds.add(list.id);
+  }
+  const tasks = backup.tasks.map((task, index) =>
+    normalizeTask(task, index, knownListIds)
+  );
+
+  const seenIds = new Set<string>();
+  for (const task of tasks) {
+    if (seenIds.has(task.id)) {
+      throw new Error(`Backup contains duplicate task id "${task.id}".`);
+    }
+    seenIds.add(task.id);
+  }
+
+  // Capture before the wipe so the pre-import OS notifications can be
+  // cancelled after the restore commits (never before — a failed import
+  // must leave existing reminders untouched).
+  const staleReminders = await db.getAllAsync<{ notificationId: string | null }>(
+    'SELECT notificationId FROM reminders'
+  );
 
   await db.execAsync('BEGIN IMMEDIATE TRANSACTION');
   try {
@@ -152,12 +256,13 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
     const settings = backup.settings ?? {};
     for (const key of Object.keys(DEFAULT_SETTINGS)) {
       const value = settings[key];
-      const stringValue =
-        value === undefined
+      let stringValue =
+        value === undefined || typeof value === 'object'
           ? String(DEFAULT_SETTINGS[key as keyof AppSettings])
-          : typeof value === 'boolean'
-            ? String(value)
-            : String(value);
+          : String(value);
+      if (key === 'defaultListId' && !knownListIds.has(stringValue)) {
+        stringValue = INBOX_LIST_ID;
+      }
       await db.runAsync(
         'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
         [key, stringValue]
@@ -166,7 +271,7 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
 
     await db.runAsync(
       'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-      ['schemaVersion', '2']
+      ['schemaVersion', String(SCHEMA_VERSION)]
     );
 
     await db.execAsync('COMMIT');
@@ -174,6 +279,12 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
     await db.execAsync('ROLLBACK');
     throw error;
   }
+
+  await cancelScheduledNotifications(
+    staleReminders
+      .map((row) => row.notificationId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  );
 
   for (const task of tasks) {
     if (task.reminderAt && task.status === 'active') {
@@ -267,9 +378,11 @@ export async function runExportWithFeedback(): Promise<void> {
 }
 
 export async function runImportWithFeedback(
-  onRestored: () => void | Promise<void>
+  onRestored: () => void | Promise<void>,
+  onBusyChange?: (busy: boolean) => void
 ): Promise<void> {
   confirmImportBackup(async () => {
+    onBusyChange?.(true);
     try {
       const imported = await importBackupFromFile();
       if (!imported) return;
@@ -282,6 +395,8 @@ export async function runImportWithFeedback(
       const message =
         error instanceof Error ? error.message : 'Could not import backup.';
       Alert.alert('Import failed', message);
+    } finally {
+      onBusyChange?.(false);
     }
   });
 }
