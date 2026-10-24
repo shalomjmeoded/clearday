@@ -32,3 +32,22 @@ export function getPlanPeriod(productId: string): string {
   if (productId === PRODUCT_IDS.yearly) return '/ year';
   return '';
 }
+
+/** Compact form used in the legal subscription disclosure. */
+export function getPlanBillingPeriod(productId: string): string {
+  if (productId === PRODUCT_IDS.monthly) return '/month';
+  if (productId === PRODUCT_IDS.yearly) return '/year';
+  return '';
+}
+
+/**
+ * Shown in the subscription disclosure only when live store prices are
+ * unavailable (offline, offerings failed). The disclosure is required by App
+ * Store review and must render regardless, so this cannot simply be omitted.
+ * Keep in sync with App Store Connect; live prices always win and are
+ * correctly localized.
+ */
+export const FALLBACK_PRICE_STRINGS: Record<ProductId, string> = {
+  [PRODUCT_IDS.monthly]: '$3.99',
+  [PRODUCT_IDS.yearly]: '$19.99',
+};

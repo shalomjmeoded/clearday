@@ -22,7 +22,19 @@ import {
   syncScheduledReminders,
 } from '@/features/reminders/reminderService';
 import { taskRepository } from '@/features/tasks/taskRepository';
-import { useProStore } from '@/store/proStore';
+import {
+  PRO_ENTITLEMENT_CACHE_KEY,
+  readCachedEntitlement,
+  writeCachedEntitlement,
+} from '@/features/pro/proEntitlementCache';
+import {
+  __getSubscriptionPackages,
+  NoSubscriptionPackagesError,
+  PurchaseFlowError,
+  PurchasesNotConfiguredError,
+  revenueCatSubscriptionService,
+} from '@/features/pro/subscriptionService';
+import { getIsPro, useProStore } from '@/store/proStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useToastStore } from '@/store/toastStore';
 import { parseTaskInput } from '@/utils/parseTaskInput';
@@ -1093,6 +1105,699 @@ async function main() {
     assert.equal(await importBackupFromFile(), true);
     const row = await taskRepository.getById('lonely');
     assert.equal(row!.recurringTaskId, undefined, 'dangling link dropped on import');
+  });
+
+  // ---- pro store: subscription failure recovery --------------------------------
+  const svc = revenueCatSubscriptionService as {
+    getProStatus: typeof revenueCatSubscriptionService.getProStatus;
+    getOfferings: typeof revenueCatSubscriptionService.getOfferings;
+    purchase: typeof revenueCatSubscriptionService.purchase;
+    restorePurchases: typeof revenueCatSubscriptionService.restorePurchases;
+  };
+  const originalGetProStatus = svc.getProStatus;
+  const originalGetOfferings = svc.getOfferings;
+  const originalPurchase = svc.purchase;
+  const originalRestore = svc.restorePurchases;
+  const resetSvc = () => {
+    svc.getProStatus = originalGetProStatus;
+    svc.getOfferings = originalGetOfferings;
+    svc.purchase = originalPurchase;
+    svc.restorePurchases = originalRestore;
+  };
+
+  await test('pro: unknown status keeps the last known entitlement', async () => {
+    useProStore.setState({ isPro: true, activeProductId: 'yearly', error: null });
+    svc.getProStatus = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    await useProStore.getState().refreshProStatus();
+    assert.equal(useProStore.getState().isPro, true, 'Pro not revoked on unknown');
+    assert.equal(useProStore.getState().activeProductId, 'yearly');
+    resetSvc();
+  });
+
+  await test('pro: authoritative revenuecat status does update entitlement', async () => {
+    useProStore.setState({ isPro: true, activeProductId: 'yearly' });
+    svc.getProStatus = async () => ({ isPro: false, source: 'revenuecat' as const, productId: null });
+    await useProStore.getState().refreshProStatus();
+    assert.equal(useProStore.getState().isPro, false, 'real expiry locks Pro');
+    resetSvc();
+  });
+
+  await test('pro: restore with unknown source neither clears Pro nor claims no purchase', async () => {
+    useProStore.setState({ isPro: true, activeProductId: 'yearly', error: null });
+    svc.restorePurchases = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    const result = await useProStore.getState().restorePurchases();
+    assert.equal(result.restored, false);
+    assert.match(result.message, /Could not restore/);
+    assert.equal(useProStore.getState().isPro, true, 'entitlement preserved');
+    assert.equal(useProStore.getState().restoring, false);
+    resetSvc();
+  });
+
+  await test('pro: purchase failures map to a message AND the right recovery action', async () => {
+    const cases: [string, RegExp | null, string | null][] = [
+      ['cancelled', null, null],
+      ['network', /No internet/, 'retry-purchase'],
+      ['pending', /awaiting approval/, 'none'],
+      ['already-owned', /already linked/, 'restore'],
+      ['not-allowed', /not allowed/, 'none'],
+      ['store-problem', /App Store/, 'retry-purchase'],
+      ['product-unavailable', /unavailable/, 'retry-plans'],
+      ['not-configured', /unavailable right now/, 'retry-plans'],
+      ['unknown', /Purchase failed/, 'retry-purchase'],
+    ];
+    for (const [reason, pattern, action] of cases) {
+      useProStore.setState({ error: null, purchasing: false });
+      svc.purchase = async () => {
+        throw new PurchaseFlowError('boom', reason as never);
+      };
+      await useProStore.getState().purchase('com.do.simpletodo.pro.yearly');
+      const { error, purchasing } = useProStore.getState();
+      assert.equal(purchasing, false, `${reason}: purchasing reset`);
+      if (pattern === null) {
+        assert.equal(error, null, 'cancel shows no error');
+      } else {
+        assert.match(error?.message ?? '', pattern, `${reason} message`);
+        assert.equal(error?.action, action, `${reason} recovery action`);
+      }
+    }
+    resetSvc();
+  });
+
+  await test('pro: successful purchase applies the entitlement', async () => {
+    useProStore.setState({ isPro: false, activeProductId: null, error: null });
+    svc.purchase = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: 'com.do.simpletodo.pro.yearly',
+    });
+    await useProStore.getState().purchase('com.do.simpletodo.pro.yearly');
+    const state = useProStore.getState();
+    assert.equal(state.isPro, true);
+    assert.equal(state.activeProductId, 'com.do.simpletodo.pro.yearly');
+    assert.equal(state.error, null);
+    assert.equal(state.provisional, false);
+    resetSvc();
+  });
+
+  await test('pro: a purchase that returns no entitlement is surfaced, not silent', async () => {
+    useProStore.setState({ isPro: false, activeProductId: null, error: null });
+    svc.purchase = async () => ({
+      isPro: false,
+      source: 'revenuecat' as const,
+      productId: null,
+    });
+    await useProStore.getState().purchase('com.do.simpletodo.pro.yearly');
+    const { error, purchasing, isPro } = useProStore.getState();
+    assert.equal(purchasing, false);
+    assert.equal(isPro, false);
+    assert.match(error?.message ?? '', /purchase went through/);
+    assert.equal(error?.action, 'restore', 'offers Restore, not a blind retry');
+    resetSvc();
+  });
+
+  await test('pro: offerings failures map to the right recovery action', async () => {
+    const cases: [() => unknown, RegExp, string][] = [
+      [
+        () => new PurchasesNotConfiguredError('unsupported'),
+        /not available on this platform/,
+        'none',
+      ],
+      [
+        () => new PurchasesNotConfiguredError('missing-key'),
+        /not configured in this build/,
+        'none',
+      ],
+      [
+        () => new PurchasesNotConfiguredError('failed'),
+        /Could not reach/,
+        'retry-plans',
+      ],
+      [() => new NoSubscriptionPackagesError(), /No subscription products/, 'retry-plans'],
+      [
+        () => Object.assign(new Error('offline'), { networkError: true }),
+        /No internet/,
+        'retry-plans',
+      ],
+      [() => new Error('boom'), /Could not load plans/, 'retry-plans'],
+    ];
+
+    for (const [makeError, pattern, action] of cases) {
+      useProStore.setState({ error: null, offerings: [{ id: 'x' } as never] });
+      svc.getOfferings = async () => {
+        throw makeError();
+      };
+      await useProStore.getState().loadOfferings();
+      const { error, offerings, loading } = useProStore.getState();
+      assert.match(error?.message ?? '', pattern);
+      assert.equal(error?.action, action);
+      assert.equal(offerings.length, 0, 'stale plans cleared on failure');
+      assert.equal(loading, false, 'loading always resets');
+    }
+    resetSvc();
+  });
+
+  await test('pro: a successful offerings load clears a previous error', async () => {
+    useProStore.setState({
+      error: { message: 'stale', action: 'retry-plans' },
+      offerings: [],
+    });
+    svc.getOfferings = async () => [
+      {
+        id: 'yearly',
+        identifier: 'yearly',
+        title: 'Yearly',
+        priceString: '$19.99',
+        productId: 'com.do.simpletodo.pro.yearly',
+      },
+    ];
+    await useProStore.getState().loadOfferings();
+    const state = useProStore.getState();
+    assert.equal(state.error, null);
+    assert.equal(state.offerings.length, 1);
+    resetSvc();
+  });
+
+  // ---- pro entitlement cache (cold-start gating) -------------------------------
+  await test('cache: round-trips an active entitlement', async () => {
+    await freshDb();
+    const expires = new Date(Date.now() + 86_400_000).toISOString();
+    await writeCachedEntitlement({
+      isPro: true,
+      productId: 'com.do.simpletodo.pro.yearly',
+      expiresAt: expires,
+    });
+    const cached = await readCachedEntitlement();
+    assert.equal(cached!.isPro, true);
+    assert.equal(cached!.productId, 'com.do.simpletodo.pro.yearly');
+    assert.ok(cached!.cachedAt, 'stamped');
+  });
+
+  await test('cache: an expired Pro cache does not keep Pro unlocked', async () => {
+    await freshDb();
+    await writeCachedEntitlement({
+      isPro: true,
+      productId: 'com.do.simpletodo.pro.monthly',
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const cached = await readCachedEntitlement();
+    assert.equal(cached!.isPro, false, 'stale cache falls back to free');
+    assert.equal(cached!.productId, null);
+  });
+
+  await test('cache: an entitlement with no expiry stays valid', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: 'lifetime', expiresAt: null });
+    assert.equal((await readCachedEntitlement())!.isPro, true);
+  });
+
+  await test('cache: missing or corrupt cache reads as null', async () => {
+    const db = await freshDb();
+    assert.equal(await readCachedEntitlement(), null, 'no row');
+    await db.runAsync(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+      [PRO_ENTITLEMENT_CACHE_KEY, '{not json']
+    );
+    assert.equal(await readCachedEntitlement(), null, 'corrupt row');
+  });
+
+  await test('pro: hydrate seeds Pro from cache before RevenueCat answers', async () => {
+    await freshDb();
+    await writeCachedEntitlement({
+      isPro: true,
+      productId: 'com.do.simpletodo.pro.yearly',
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    useProStore.setState({ isPro: false, hydrated: false, provisional: false, activeProductId: null });
+
+    await useProStore.getState().hydrateProStatus();
+
+    assert.equal(getIsPro(), true, 'gates see Pro from the first frame');
+    assert.equal(useProStore.getState().provisional, true, 'marked provisional');
+    assert.equal(useProStore.getState().activeProductId, 'com.do.simpletodo.pro.yearly');
+  });
+
+  await test('pro: a confirmed refresh clears provisional and rewrites the cache', async () => {
+    await freshDb();
+    useProStore.setState({ isPro: true, provisional: true, hydrated: true });
+    const expires = new Date(Date.now() + 86_400_000).toISOString();
+    svc.getProStatus = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: 'com.do.simpletodo.pro.monthly',
+      expiresAt: expires,
+    });
+
+    await useProStore.getState().refreshProStatus();
+
+    assert.equal(useProStore.getState().provisional, false);
+    const cached = await readCachedEntitlement();
+    assert.equal(cached!.productId, 'com.do.simpletodo.pro.monthly', 'cache updated');
+    assert.equal(cached!.expiresAt, expires);
+    resetSvc();
+  });
+
+  await test('pro: a real expiry clears the cached Pro flag too', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: 'yearly', expiresAt: null });
+    useProStore.setState({ isPro: true, provisional: true, hydrated: true });
+    svc.getProStatus = async () => ({
+      isPro: false,
+      source: 'revenuecat' as const,
+      productId: null,
+    });
+
+    await useProStore.getState().refreshProStatus();
+
+    assert.equal(getIsPro(), false);
+    assert.equal((await readCachedEntitlement())!.isPro, false, 'cache no longer grants Pro');
+    resetSvc();
+  });
+
+  await test('pro: offline refresh after hydrate keeps cached Pro', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: 'yearly', expiresAt: null });
+    useProStore.setState({ isPro: false, hydrated: false, provisional: false, activeProductId: null });
+    await useProStore.getState().hydrateProStatus();
+
+    svc.getProStatus = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    await useProStore.getState().refreshProStatus();
+
+    assert.equal(getIsPro(), true, 'offline launch keeps a paying user on Pro');
+    assert.equal((await readCachedEntitlement())!.isPro, true, 'cache untouched');
+    resetSvc();
+  });
+
+  // ---- offering selection (dashboard rename resilience) ------------------------
+  const pkgFor = (productId: string) => ({
+    identifier: productId,
+    packageType: 'ANNUAL',
+    product: {
+      identifier: productId,
+      title: 'Pro',
+      description: '',
+      priceString: '$19.99',
+    },
+  });
+  const offeringWith = (identifier: string, productIds: string[]) => ({
+    identifier,
+    availablePackages: productIds.map(pkgFor),
+  });
+  const YEARLY = 'com.do.simpletodo.pro.yearly';
+  const MONTHLY = 'com.do.simpletodo.pro.monthly';
+
+  await test('offerings: the current offering wins over a stale named one', () => {
+    const stale = offeringWith('default', []);
+    const live = offeringWith('default_v2', [YEARLY, MONTHLY]);
+    const packages = __getSubscriptionPackages({
+      all: { default: stale, default_v2: live },
+      current: live,
+    } as never);
+    assert.equal(packages.length, 2, 'renamed current offering still resolves');
+  });
+
+  await test('offerings: falls back to the configured ID when current is empty', () => {
+    const named = offeringWith('default', [YEARLY]);
+    const emptyCurrent = offeringWith('promo', []);
+    const packages = __getSubscriptionPackages({
+      all: { default: named, promo: emptyCurrent },
+      current: emptyCurrent,
+    } as never);
+    assert.equal(packages.length, 1);
+    assert.equal(packages[0].product.identifier, YEARLY);
+  });
+
+  await test('offerings: falls back to any other offering as a last resort', () => {
+    const other = offeringWith('seasonal', [MONTHLY]);
+    const packages = __getSubscriptionPackages({
+      all: { seasonal: other },
+      current: null,
+    } as never);
+    assert.equal(packages.length, 1);
+    assert.equal(packages[0].product.identifier, MONTHLY);
+  });
+
+  await test('offerings: unknown product IDs are filtered out everywhere', () => {
+    const junk = offeringWith('default', ['com.someone.else.pro']);
+    assert.equal(
+      __getSubscriptionPackages({ all: { default: junk }, current: junk } as never).length,
+      0,
+      'foreign products never reach the paywall'
+    );
+  });
+
+  await test('offerings: no offerings at all resolves to no packages', () => {
+    assert.equal(
+      __getSubscriptionPackages({ all: {}, current: null } as never).length,
+      0
+    );
+    assert.equal(
+      __getSubscriptionPackages({ all: undefined, current: undefined } as never).length,
+      0,
+      'missing fields do not throw'
+    );
+  });
+
+  await test('backup: the entitlement cache is not exported', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: 'yearly', expiresAt: null });
+    const backup = await buildBackup();
+    assert.equal(
+      backup.settings?.[PRO_ENTITLEMENT_CACHE_KEY],
+      undefined,
+      'purchase cache stays on the device'
+    );
+  });
+
+  await test('backup: importing a backup does not drop Pro status', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: 'yearly', expiresAt: null });
+    const backup = await buildBackup();
+    const path = join(cacheDirectory, `pro-${Math.random()}.clearday`);
+    await writeFile(path, JSON.stringify(backup), 'utf8');
+    __setPickerResult({ canceled: false, assets: [{ uri: path }] });
+    assert.equal(await importBackupFromFile(), true);
+    assert.equal(
+      (await readCachedEntitlement())!.isPro,
+      true,
+      'restoring a backup must not lock a paying user out'
+    );
+  });
+
+  // ---- billing notices ---------------------------------------------------------
+  await test('notice: a billing issue warns but keeps Pro unlocked', async () => {
+    await freshDb();
+    useProStore.setState({ isPro: false, notice: null, hydrated: true });
+    svc.getProStatus = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: YEARLY,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      billingIssueDetectedAt: new Date().toISOString(),
+      willRenew: true,
+    });
+    await useProStore.getState().refreshProStatus();
+    const { isPro, notice } = useProStore.getState();
+    assert.equal(isPro, true, 'billing issue never gates features');
+    assert.equal(notice?.tone, 'warning');
+    assert.match(notice?.message ?? '', /billing problem/);
+    resetSvc();
+  });
+
+  await test('notice: a cancelled-but-active subscription reads as info', async () => {
+    await freshDb();
+    useProStore.setState({ isPro: false, notice: null, hydrated: true });
+    svc.getProStatus = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: YEARLY,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      billingIssueDetectedAt: null,
+      willRenew: false,
+    });
+    await useProStore.getState().refreshProStatus();
+    const { isPro, notice } = useProStore.getState();
+    assert.equal(isPro, true, 'cancelled users keep Pro until expiry');
+    assert.equal(notice?.tone, 'info');
+    assert.match(notice?.message ?? '', /stays active until/);
+    resetSvc();
+  });
+
+  await test('notice: a healthy subscription has no notice, and it clears', async () => {
+    await freshDb();
+    useProStore.setState({
+      isPro: true,
+      notice: { message: 'stale', tone: 'warning' },
+      hydrated: true,
+    });
+    svc.getProStatus = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: YEARLY,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      billingIssueDetectedAt: null,
+      willRenew: true,
+    });
+    await useProStore.getState().refreshProStatus();
+    assert.equal(useProStore.getState().notice, null, 'resolved issue clears the notice');
+    resetSvc();
+  });
+
+  await test('notice: a bad expiry date degrades to a message without a date', async () => {
+    await freshDb();
+    useProStore.setState({ isPro: false, notice: null, hydrated: true });
+    svc.getProStatus = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: YEARLY,
+      expiresAt: 'not-a-date',
+      billingIssueDetectedAt: new Date().toISOString(),
+      willRenew: true,
+    });
+    await useProStore.getState().refreshProStatus();
+    const { notice } = useProStore.getState();
+    assert.match(notice?.message ?? '', /billing problem/);
+    assert.ok(!/Invalid Date/.test(notice?.message ?? ''), 'never renders Invalid Date');
+    resetSvc();
+  });
+
+  // ---- foreground recovery -----------------------------------------------------
+  await test('recovery: foreground retries a retriable plans failure', async () => {
+    await freshDb();
+    let offeringCalls = 0;
+    useProStore.setState({
+      offerings: [],
+      error: { message: 'offline', action: 'retry-plans' },
+      loading: false,
+      hydrated: true,
+    });
+    svc.getProStatus = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    svc.getOfferings = async () => {
+      offeringCalls++;
+      return [
+        {
+          id: 'yearly',
+          identifier: 'yearly',
+          title: 'Yearly',
+          priceString: '$19.99',
+          productId: YEARLY,
+        },
+      ];
+    };
+
+    await useProStore.getState().recoverOnForeground();
+
+    assert.equal(offeringCalls, 1, 'retried once');
+    assert.equal(useProStore.getState().offerings.length, 1, 'plans recovered');
+    assert.equal(useProStore.getState().error, null, 'error cleared');
+    resetSvc();
+  });
+
+  await test('recovery: foreground does NOT retry unfixable failures', async () => {
+    await freshDb();
+    let offeringCalls = 0;
+    useProStore.setState({
+      offerings: [],
+      error: { message: 'missing key', action: 'none' },
+      loading: false,
+      hydrated: true,
+    });
+    svc.getProStatus = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    svc.getOfferings = async () => {
+      offeringCalls++;
+      return [];
+    };
+
+    await useProStore.getState().recoverOnForeground();
+
+    assert.equal(offeringCalls, 0, 'a missing build key cannot fix itself');
+    resetSvc();
+  });
+
+  await test('recovery: foreground does not refetch plans it already has', async () => {
+    await freshDb();
+    let offeringCalls = 0;
+    useProStore.setState({
+      offerings: [{ productId: YEARLY } as never],
+      error: { message: 'stale', action: 'retry-plans' },
+      loading: false,
+      hydrated: true,
+    });
+    svc.getProStatus = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    svc.getOfferings = async () => {
+      offeringCalls++;
+      return [];
+    };
+
+    await useProStore.getState().recoverOnForeground();
+
+    assert.equal(offeringCalls, 0, 'no wasted network call');
+    resetSvc();
+  });
+
+  await test('recovery: foreground still refreshes entitlement on every return', async () => {
+    await freshDb();
+    let statusCalls = 0;
+    useProStore.setState({ isPro: false, offerings: [], error: null, hydrated: true });
+    svc.getProStatus = async () => {
+      statusCalls++;
+      return {
+        isPro: true,
+        source: 'revenuecat' as const,
+        productId: YEARLY,
+        expiresAt: null,
+        billingIssueDetectedAt: null,
+        willRenew: true,
+      };
+    };
+
+    await useProStore.getState().recoverOnForeground();
+
+    assert.equal(statusCalls, 1);
+    assert.equal(getIsPro(), true, 'a renewal taken outside the app is picked up');
+    resetSvc();
+  });
+
+  // ---- cross-cutting edge cases ------------------------------------------------
+  await test('edge: hydrate runs only once, later calls do not clobber live state', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: YEARLY, expiresAt: null });
+    useProStore.setState({ isPro: false, hydrated: false, provisional: false });
+    await useProStore.getState().hydrateProStatus();
+    assert.equal(getIsPro(), true);
+
+    // A confirmed downgrade, then a stray second hydrate.
+    useProStore.setState({ isPro: false, provisional: false });
+    await useProStore.getState().hydrateProStatus();
+    assert.equal(getIsPro(), false, 'cache does not resurrect a revoked entitlement');
+  });
+
+  await test('edge: a cancelled purchase leaves no error and no state change', async () => {
+    await freshDb();
+    useProStore.setState({
+      isPro: false,
+      activeProductId: null,
+      error: null,
+      purchasing: false,
+    });
+    svc.purchase = async () => {
+      throw new PurchaseFlowError('cancelled', 'cancelled' as never);
+    };
+    await useProStore.getState().purchase(YEARLY);
+    const state = useProStore.getState();
+    assert.equal(state.error, null, 'cancelling is not an error');
+    assert.equal(state.purchasing, false);
+    assert.equal(state.isPro, false);
+    resetSvc();
+  });
+
+  await test('edge: a failed purchase never downgrades an existing Pro user', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: YEARLY, expiresAt: null });
+    useProStore.setState({ isPro: true, activeProductId: YEARLY, error: null });
+    svc.purchase = async () => {
+      throw new PurchaseFlowError('boom', 'network' as never);
+    };
+    await useProStore.getState().purchase(MONTHLY);
+    assert.equal(getIsPro(), true, 'an upgrade attempt that fails keeps current Pro');
+    assert.equal(
+      (await readCachedEntitlement())!.isPro,
+      true,
+      'cache untouched by a failed purchase'
+    );
+    resetSvc();
+  });
+
+  await test('edge: a failed restore never downgrades an existing Pro user', async () => {
+    await freshDb();
+    await writeCachedEntitlement({ isPro: true, productId: YEARLY, expiresAt: null });
+    useProStore.setState({ isPro: true, activeProductId: YEARLY, error: null });
+    svc.restorePurchases = async () => {
+      throw Object.assign(new Error('offline'), { networkError: true });
+    };
+    const result = await useProStore.getState().restorePurchases();
+    assert.equal(result.restored, false);
+    assert.match(result.message, /No internet/);
+    assert.equal(getIsPro(), true, 'Pro survives a failed restore');
+    assert.equal(useProStore.getState().error?.action, 'restore');
+    resetSvc();
+  });
+
+  await test('edge: a successful restore on a fresh device caches the entitlement', async () => {
+    await freshDb();
+    useProStore.setState({ isPro: false, activeProductId: null, error: null });
+    const expires = new Date(Date.now() + 86_400_000).toISOString();
+    svc.restorePurchases = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: MONTHLY,
+      expiresAt: expires,
+      billingIssueDetectedAt: null,
+      willRenew: true,
+    });
+    const result = await useProStore.getState().restorePurchases();
+    assert.equal(result.restored, true);
+    const cached = await readCachedEntitlement();
+    assert.equal(cached!.isPro, true, 'next launch is instantly Pro');
+    assert.equal(cached!.expiresAt, expires);
+    resetSvc();
+  });
+
+  await test('edge: concurrent loadOfferings calls settle consistently', async () => {
+    await freshDb();
+    useProStore.setState({ offerings: [], error: null, loading: false });
+    svc.getOfferings = async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return [
+        {
+          id: 'yearly',
+          identifier: 'yearly',
+          title: 'Yearly',
+          priceString: '$19.99',
+          productId: YEARLY,
+        },
+      ];
+    };
+    const store = useProStore.getState();
+    await Promise.all([store.loadOfferings(), store.loadOfferings(), store.loadOfferings()]);
+    const state = useProStore.getState();
+    assert.equal(state.loading, false, 'loading always resets');
+    assert.equal(state.offerings.length, 1, 'no duplicated plans');
+    assert.equal(state.error, null);
+    resetSvc();
+  });
+
+  await test('edge: an expired cache plus an offline launch locks Pro', async () => {
+    await freshDb();
+    await writeCachedEntitlement({
+      isPro: true,
+      productId: YEARLY,
+      expiresAt: new Date(Date.now() - 86_400_000).toISOString(),
+    });
+    useProStore.setState({ isPro: false, hydrated: false, provisional: false });
+    await useProStore.getState().hydrateProStatus();
+    assert.equal(getIsPro(), false, 'an expired sub does not stay unlocked offline');
+
+    svc.getProStatus = async () => ({ isPro: false, source: 'unknown' as const, productId: null });
+    await useProStore.getState().refreshProStatus();
+    assert.equal(getIsPro(), false, 'and an unreachable service does not unlock it');
+    resetSvc();
+  });
+
+  await test('edge: entitlement with no productId still grants Pro', async () => {
+    await freshDb();
+    useProStore.setState({ isPro: false, activeProductId: null, hydrated: true });
+    svc.getProStatus = async () => ({
+      isPro: true,
+      source: 'revenuecat' as const,
+      productId: null,
+      expiresAt: null,
+      billingIssueDetectedAt: null,
+      willRenew: true,
+    });
+    await useProStore.getState().refreshProStatus();
+    assert.equal(getIsPro(), true, 'a promotional grant without a product still unlocks');
+    assert.equal(useProStore.getState().activeProductId, null);
+    resetSvc();
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

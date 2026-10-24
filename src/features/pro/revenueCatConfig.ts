@@ -1,5 +1,14 @@
 import { Platform } from 'react-native';
 
+/**
+ * `__DEV__` is injected by the React Native bundler and is undefined when this
+ * code runs outside the app (unit tests, node tooling), where a bare reference
+ * throws a ReferenceError.
+ */
+export function isDev(): boolean {
+  return typeof __DEV__ !== 'undefined' && __DEV__;
+}
+
 export function isPurchasesSupported(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
@@ -22,7 +31,7 @@ export function getRevenueCatApiKey(): string | null {
 }
 
 export function warnIfMissingRevenueCatKey(): void {
-  if (!__DEV__) return;
+  if (!isDev()) return;
 
   if (!getRevenueCatApiKey()) {
     console.warn(

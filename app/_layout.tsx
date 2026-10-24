@@ -97,6 +97,10 @@ export default function RootLayout() {
         await initDatabase();
         await initReminders();
         await useSettingsStore.getState().hydrate();
+        // Pro gates run the moment the UI is interactive, so seed entitlement
+        // from the local cache before `ready` rather than waiting on the
+        // RevenueCat round-trip that initializePurchases kicks off below.
+        await useProStore.getState().hydrateProStatus();
         await useTaskStore.getState().refreshAll();
         await useListStore.getState().refresh();
         void useProStore.getState().initializePurchases();
@@ -117,7 +121,7 @@ export default function RootLayout() {
       appState.current = nextState;
 
       if (wasBackground && nextState === 'active') {
-        void useProStore.getState().refreshProStatus();
+        void useProStore.getState().recoverOnForeground();
         if (Platform.OS !== 'web') {
           void import('@/features/reminders/reminderService').then(
             ({ syncScheduledReminders }) => syncScheduledReminders()

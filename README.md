@@ -82,7 +82,12 @@ See the [project submission checklist](docs/project-submission.md) for repositor
 
 Tables: `tasks`, `lists`, `reminders`, `settings`
 
-Default settings: system theme, haptics on, completed tasks collapsed, reminder 09:00, `isPro` false.
+Default settings: system theme, haptics on, completed tasks collapsed, reminder 09:00.
+
+Pro status is not a setting: RevenueCat is the source of truth. The last
+confirmed entitlement is cached in the `settings` table under
+`proEntitlementCache` so Pro gates work offline and during launch, and is
+excluded from backup exports.
 
 ## Stack
 

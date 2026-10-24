@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -7,7 +7,9 @@ import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { PRO_PRIVACY_NOTE } from '@/constants/privacyCopy';
 import { presentCustomerCenter } from '@/features/pro/paywallService';
 import {
+  FALLBACK_PRICE_STRINGS,
   PRODUCT_IDS,
+  getPlanBillingPeriod,
   getPlanLabel,
   getPlanPeriod,
 } from '@/features/pro/products';
@@ -18,33 +20,18 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { typography } from '@/theme/typography';
 import { triggerSelectionHaptic } from '@/utils/haptics';
 
-const FALLBACK_PLANS = [
-  {
-    id: PRODUCT_IDS.monthly,
-    label: 'Monthly',
-    price: '$3.99',
-    period: '/ month',
-  },
-  {
-    id: PRODUCT_IDS.yearly,
-    label: 'Yearly',
-    price: '$19.99',
-    period: '/ year',
-    featured: true,
-  },
-] as const;
-
 const STANDARD_APPLE_EULA_URL =
   'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
-const CUSTOMER_CENTER_OPEN_TIMEOUT_MS = 1200;
 
 const PRIVACY_POLICY_URL = 'https://clearday-seven.vercel.app/privacy';
 
 export default function ProScreen() {
   const { tokens } = useTheme();
   const isPro = useProStore((s) => s.isPro);
+  const notice = useProStore((s) => s.notice);
   const loading = useProStore((s) => s.loading);
+  const restoring = useProStore((s) => s.restoring);
   const purchasing = useProStore((s) => s.purchasing);
   const offerings = useProStore((s) => s.offerings);
   const error = useProStore((s) => s.error);
@@ -67,23 +54,25 @@ export default function ProScreen() {
     }
   }, [activeProductId]);
 
-  const plans =
-    offerings.length > 0
-      ? offerings
-        .map((pkg) => ({
-          id: pkg.productId,
-          label: getPlanLabel(pkg.productId),
-          price: pkg.priceString,
-          period: getPlanPeriod(pkg.productId),
-          featured: pkg.productId === PRODUCT_IDS.yearly,
-        }))
-      : FALLBACK_PLANS.map((plan) => ({
-          id: plan.id,
-          label: plan.label,
-          price: plan.price,
-          period: plan.period,
-          featured: 'featured' in plan ? plan.featured : false,
-        }));
+  // Keep the selection purchasable: if the loaded offerings don't include the
+  // selected product (e.g. one plan missing in the store), fall back to the
+  // yearly plan when present, otherwise the first available package.
+  useEffect(() => {
+    if (offerings.length === 0) return;
+    if (offerings.some((pkg) => pkg.productId === selectedProductId)) return;
+
+    const preferred =
+      offerings.find((pkg) => pkg.productId === PRODUCT_IDS.yearly) ?? offerings[0];
+    setSelectedProductId(preferred.productId);
+  }, [offerings, selectedProductId]);
+
+  const plans = offerings.map((pkg) => ({
+    id: pkg.productId,
+    label: getPlanLabel(pkg.productId),
+    price: pkg.priceString,
+    period: getPlanPeriod(pkg.productId),
+    featured: pkg.productId === PRODUCT_IDS.yearly,
+  }));
 
   const handlePurchase = useCallback(async () => {
     await triggerSelectionHaptic();
@@ -96,16 +85,51 @@ export default function ProScreen() {
     Alert.alert('Restore Purchases', result.message);
   }, [restorePurchases]);
 
+  // The recovery button under an error must match what actually failed:
+  // reloading plans does not help a declined purchase, and an
+  // already-owned subscription needs Restore rather than Retry.
+  const errorAction = useMemo(() => {
+    switch (error?.action) {
+      case 'retry-plans':
+        return { label: 'Retry', run: loadOfferings };
+      case 'retry-purchase':
+        return { label: 'Try again', run: handlePurchase };
+      case 'restore':
+        return { label: 'Restore Purchases', run: handleRestore };
+      default:
+        return null;
+    }
+  }, [error?.action, loadOfferings, handlePurchase, handleRestore]);
+
+  // Legal disclosure prices: prefer the live, localized store price and fall
+  // back to the static strings only when offerings are unavailable, since the
+  // disclosure has to render either way.
+  const disclosureLines = useMemo(
+    () =>
+      ([PRODUCT_IDS.monthly, PRODUCT_IDS.yearly] as const).map((productId) => {
+        const livePrice = offerings.find(
+          (pkg) => pkg.productId === productId
+        )?.priceString;
+
+        return `${getPlanLabel(productId)} Pro: ${
+          livePrice ?? FALLBACK_PRICE_STRINGS[productId]
+        }${getPlanBillingPeriod(productId)}`;
+      }),
+    [offerings]
+  );
+
+  const errorActionBusy =
+    (error?.action === 'retry-plans' && loading) ||
+    (error?.action === 'retry-purchase' && purchasing) ||
+    (error?.action === 'restore' && restoring);
+
   const handleCustomerCenter = useCallback(async () => {
     await triggerSelectionHaptic();
     console.info('[Subscriptions] Manage subscription pressed.');
 
-    const openedCustomerCenter = await Promise.race([
-      presentCustomerCenter(),
-      new Promise<boolean>((resolve) => {
-        setTimeout(() => resolve(false), CUSTOMER_CENTER_OPEN_TIMEOUT_MS);
-      }),
-    ]);
+    // presentCustomerCenter resolves after the sheet is dismissed (or returns
+    // false if presenting failed), so only fall back when it reports failure.
+    const openedCustomerCenter = await presentCustomerCenter();
     if (openedCustomerCenter) return;
 
     try {
@@ -169,6 +193,41 @@ export default function ProScreen() {
             </View>
           ) : null}
 
+          {notice ? (
+            <View
+              style={[
+                styles.notice,
+                {
+                  backgroundColor: tokens.card,
+                  borderColor: notice.tone === 'warning' ? tokens.accent : tokens.border,
+                },
+              ]}
+              accessibilityLiveRegion="polite"
+            >
+              <Text style={[typography.meta, styles.noticeText, { color: tokens.text }]}>
+                {notice.message}
+              </Text>
+              {/* Only the urgent case gets its own button: a cancelled-but-active
+                  subscription is served by the "Manage subscription" button below,
+                  and two identical buttons on one screen reads as a bug. */}
+              {notice.tone === 'warning' ? (
+                <Pressable
+                  onPress={() => void handleCustomerCenter()}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.retryBtn,
+                    { borderColor: tokens.border, minHeight: MIN_TOUCH_TARGET },
+                    pressed && { opacity: 0.75 },
+                  ]}
+                >
+                  <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
+                    Update payment method
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
           <Text style={[typography.heroTitle, styles.title, { color: tokens.text }]}>
             Make Do! yours.
           </Text>
@@ -185,7 +244,7 @@ export default function ProScreen() {
             </View>
           ) : null}
 
-          <View style={styles.plans}>
+          <View style={styles.plans} accessibilityRole="radiogroup">
             {plans.map((plan) => {
               const selected = (activeProductId ?? selectedProductId) === plan.id;
 
@@ -197,6 +256,9 @@ export default function ProScreen() {
                     setSelectedProductId(plan.id);
                   }}
                   disabled={isPro}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected, disabled: isPro }}
+                  accessibilityLabel={`${plan.label}, ${plan.price}${plan.period}`}
                   style={[
                     styles.plan,
                     {
@@ -224,35 +286,42 @@ export default function ProScreen() {
           </View>
 
           {error ? (
-            <View style={styles.errorBox}>
+            <View style={styles.errorBox} accessibilityLiveRegion="polite">
               <Text style={[typography.meta, { color: tokens.mutedText, lineHeight: 20 }]}>
-                {error}
+                {error.message}
               </Text>
-              <Pressable
-                onPress={() => void loadOfferings()}
-                style={({ pressed }) => [
-                  styles.retryBtn,
-                  { borderColor: tokens.border, minHeight: MIN_TOUCH_TARGET },
-                  pressed && { opacity: 0.75 },
-                ]}
-              >
-                <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
-                  Retry
-                </Text>
-              </Pressable>
+              {errorAction ? (
+                <Pressable
+                  onPress={() => void errorAction.run()}
+                  disabled={errorActionBusy}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: errorActionBusy, busy: errorActionBusy }}
+                  style={({ pressed }) => [
+                    styles.retryBtn,
+                    { borderColor: tokens.border, minHeight: MIN_TOUCH_TARGET },
+                    (pressed || errorActionBusy) && { opacity: 0.6 },
+                  ]}
+                >
+                  <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
+                    {errorAction.label}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 
           {!isPro ? (
-            <>
+            offerings.length > 0 ? (
               <Pressable
                 onPress={() => void handlePurchase()}
-                disabled={purchasing || offerings.length === 0}
+                disabled={purchasing}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: purchasing, busy: purchasing }}
                 style={({ pressed }) => [
                   styles.cta,
                   {
                     backgroundColor: tokens.accent,
-                    opacity: purchasing || offerings.length === 0 ? 0.45 : pressed ? 0.85 : 1,
+                    opacity: purchasing ? 0.45 : pressed ? 0.85 : 1,
                     minHeight: MIN_TOUCH_TARGET,
                   },
                 ]}
@@ -261,11 +330,11 @@ export default function ProScreen() {
                   {purchasing ? 'Processing…' : 'Continue with selected plan'}
                 </Text>
               </Pressable>
-
-            </>
+            ) : null
           ) : (
             <Pressable
               onPress={() => void handleCustomerCenter()}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.secondaryBtn,
                 { borderColor: tokens.border, minHeight: MIN_TOUCH_TARGET },
@@ -280,14 +349,17 @@ export default function ProScreen() {
 
           <Pressable
             onPress={() => void handleRestore()}
+            disabled={restoring}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: restoring, busy: restoring }}
             style={({ pressed }) => [
               styles.restoreBtn,
               { borderColor: tokens.border, minHeight: MIN_TOUCH_TARGET },
-              pressed && { opacity: 0.75 },
+              (pressed || restoring) && { opacity: 0.6 },
             ]}
           >
             <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
-              Restore Purchases
+              {restoring ? 'Restoring…' : 'Restore Purchases'}
             </Text>
           </Pressable>
 
@@ -314,8 +386,8 @@ export default function ProScreen() {
           {!isPro ? (
             <View style={styles.subscriptionDisclosure}>
               <Text style={[typography.meta, styles.disclosureText, { color: tokens.mutedText }]}>
-                Monthly Pro: $3.99/month{'\n'}
-                Yearly Pro: $19.99/year{'\n\n'}
+                {disclosureLines.join('\n')}
+                {'\n\n'}
                 Subscriptions automatically renew unless canceled at least 24 hours before
                 the end of the current billing period. Payment will be charged to the
                 user&apos;s Apple ID account at confirmation of purchase.
@@ -379,6 +451,19 @@ const styles = StyleSheet.create({
   errorBox: {
     gap: spacing.sm,
     marginBottom: spacing.lg,
+  },
+  notice: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: spacing.lg,
+  },
+  noticeText: {
+    lineHeight: 20,
+    textTransform: 'none',
+    letterSpacing: 0,
+    fontWeight: '400',
   },
   retryBtn: {
     justifyContent: 'center',

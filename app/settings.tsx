@@ -73,6 +73,7 @@ export default function SettingsScreen() {
   const { tokens } = useTheme();
   const settings = useSettingsStore((s) => s.settings);
   const isPro = useProStore((s) => s.isPro);
+  const proNotice = useProStore((s) => s.notice);
   const setSetting = useSettingsStore((s) => s.setSetting);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
   const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null);
@@ -183,9 +184,17 @@ export default function SettingsScreen() {
         </SettingsGroup>
 
         <SettingsGroup title="Pro">
+          {/* A billing problem is otherwise only visible on the Pro screen,
+              which a subscriber has no reason to open before access lapses. */}
           <SettingsRow
             label={isPro ? 'Do! Pro' : 'Upgrade to Pro'}
-            value={isPro ? 'Active' : undefined}
+            value={
+              proNotice?.tone === 'warning'
+                ? 'Action needed'
+                : isPro
+                  ? 'Active'
+                  : undefined
+            }
             onPress={() => router.push('/pro')}
           />
           <SettingsRow

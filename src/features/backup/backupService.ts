@@ -11,6 +11,7 @@ import {
   scheduleReminderForTask,
 } from '@/features/reminders/reminderService';
 import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
+import { PRO_ENTITLEMENT_CACHE_KEY } from '@/features/pro/proEntitlementCache';
 import type { ClearDayBackup } from '@/types/backup';
 import {
   CLEARDAY_BACKUP_VERSION,
@@ -41,6 +42,9 @@ export async function buildBackup(): Promise<ClearDayBackup> {
   const settings: Record<string, unknown> = {};
   for (const row of settingRows) {
     if (row.key === 'schemaVersion') continue;
+    // Device-local purchase cache: not user data, and it should not travel
+    // between devices in a shared backup file.
+    if (row.key === PRO_ENTITLEMENT_CACHE_KEY) continue;
     settings[row.key] = row.value;
   }
 
