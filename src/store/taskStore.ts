@@ -74,6 +74,7 @@ interface TaskState {
   tomorrowTasks: Task[];
   laterTasks: Task[];
   doneTasks: Task[];
+  archivedTasks: Task[];
   listTasks: Task[];
   loading: boolean;
   todayReady: boolean;
@@ -81,6 +82,7 @@ interface TaskState {
   refreshTomorrow: () => Promise<void>;
   refreshLater: () => Promise<void>;
   refreshDone: () => Promise<void>;
+  refreshArchived: () => Promise<void>;
   refreshList: (listId: string) => Promise<void>;
   addTask: (
     raw: string,
@@ -90,6 +92,7 @@ interface TaskState {
   completeTask: (id: string) => Promise<void>;
   uncompleteTask: (id: string) => Promise<void>;
   archiveTask: (id: string) => Promise<void>;
+  unarchiveTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   setImportant: (id: string) => Promise<void>;
   toggleRecurring: (id: string) => Promise<void>;
@@ -192,6 +195,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   tomorrowTasks: [],
   laterTasks: [],
   doneTasks: [],
+  archivedTasks: [],
   listTasks: [],
   loading: false,
   todayReady: false,
@@ -240,6 +244,16 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     const doneTasks = await fetchDoneTasks();
     set({ doneTasks });
+  },
+
+  refreshArchived: async () => {
+    if (Platform.OS === 'web') {
+      set({ archivedTasks: [] });
+      return;
+    }
+
+    const archivedTasks = await taskRepository.getArchived();
+    set({ archivedTasks });
   },
 
   refreshList: async (listId: string) => {
@@ -360,8 +374,37 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   archiveTask: async (id) => {
     const existing = await taskRepository.getById(id);
+    if (!existing) return;
     await taskRepository.archive(id);
-    await refreshAfterMutation(get, existing?.listId);
+    await refreshAfterMutation(get, existing.listId);
+    await get().refreshArchived();
+    // Archive takes the row out of every list at once, so offer a way back
+    // right here; the task also stays reachable under Finished → Archived.
+    useToastStore.getState().show('Archived', {
+      action: {
+        label: 'Undo',
+        onPress: async () => {
+          await taskRepository.update(id, {
+            status: existing.status,
+            completedAt: existing.completedAt,
+            reminderAt: existing.reminderAt,
+          });
+          await refreshAfterMutation(get, existing.listId);
+          await get().refreshDone();
+          await get().refreshArchived();
+        },
+      },
+    });
+  },
+
+  unarchiveTask: async (id) => {
+    const existing = await taskRepository.getById(id);
+    if (!existing) return;
+    set((state) => ({
+      archivedTasks: state.archivedTasks.filter((task) => task.id !== id),
+    }));
+    await taskRepository.unarchive(id);
+    await refreshAfterMutation(get, existing.listId);
   },
 
   deleteTask: async (id) => {

@@ -25,6 +25,7 @@ import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { QuickAddOptions } from '@/types/quickAdd';
 import { isOverdue, isToday, formatHeaderDate } from '@/utils/dates';
+import { applyPartialOrder } from '@/utils/reorder';
 import {
   triggerLightHaptic,
   triggerMediumHaptic,
@@ -578,7 +579,17 @@ export default function TodayScreen() {
           onDelete={handleDelete}
           onSetImportant={setImportant}
           onToggleRecurring={toggleRecurring}
-          onReorder={(orderedIds) => reorderTasks(orderedIds, defaultListId)}
+          onReorder={(orderedIds) =>
+            // The list may be filtered or searched; only the visible rows
+            // moved, so hidden tasks keep their slots.
+            reorderTasks(
+              applyPartialOrder(
+                listScopedActive.map((task) => task.id),
+                orderedIds
+              ),
+              defaultListId
+            )
+          }
           reorderMode={reorderMode}
         />
       </View>

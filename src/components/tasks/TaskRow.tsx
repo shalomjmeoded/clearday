@@ -47,6 +47,8 @@ interface Props {
   swipeEnabled?: boolean;
   onRowLayout?: (layout: { height: number; width: number; y: number }) => void;
   compact?: boolean;
+  /** Row of an archived task: the primary action brings it back rather than completing it. */
+  restoreMode?: boolean;
 }
 
 function TaskRowInner({
@@ -64,6 +66,7 @@ function TaskRowInner({
   swipeEnabled = true,
   onRowLayout,
   compact = false,
+  restoreMode = false,
 }: Props) {
   const { tokens } = useTheme();
   const swipeRef = useRef<Swipeable>(null);
@@ -234,16 +237,26 @@ function TaskRowInner({
       ) : null}
       <RectButton
         accessibilityRole="button"
-        accessibilityLabel={completed ? 'Mark as to-do' : 'Mark done'}
+        accessibilityLabel={
+          restoreMode ? 'Restore task' : completed ? 'Mark as to-do' : 'Mark done'
+        }
         style={[styles.iconAction, { backgroundColor: tokens.actionRead }]}
         onPress={() => runAction(onComplete)}
       >
         <Ionicons
-          name={completed ? 'mail-unread-outline' : 'mail-open-outline'}
+          name={
+            restoreMode
+              ? 'arrow-undo-outline'
+              : completed
+                ? 'mail-unread-outline'
+                : 'mail-open-outline'
+          }
           size={16}
           color="#fff"
         />
-        <Text style={styles.actionLabel}>{completed ? 'Todo' : 'Done'}</Text>
+        <Text style={styles.actionLabel}>
+          {restoreMode ? 'Restore' : completed ? 'Todo' : 'Done'}
+        </Text>
       </RectButton>
     </View>
   );

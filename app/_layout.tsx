@@ -4,7 +4,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Platform, StyleSheet, useColorScheme } from 'react-native';
+import { Alert, AppState, Platform, StyleSheet, useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 
 import { BootstrapScreen } from '@/components/layout/BootstrapScreen';
@@ -95,6 +95,37 @@ export default function RootLayout() {
         ]);
 
         await initDatabase();
+        // A damaged file is rare but, without this, would surface as missing
+        // tasks with no explanation. The check is linear and cheap here.
+        void import('@/db/snapshot').then(async ({ checkIntegrity, getSnapshotInfo, restoreSnapshot }) => {
+          if (await checkIntegrity()) return;
+          console.warn('[db] quick_check failed');
+          const snapshot = await getSnapshotInfo();
+          if (!snapshot) return;
+          Alert.alert(
+            'Your task data needs repair',
+            'The database on this device looks damaged. Do! has a copy from just before the last app update. Restore it?',
+            [
+              { text: 'Not now', style: 'cancel' },
+              {
+                text: 'Restore copy',
+                onPress: () =>
+                  void restoreSnapshot()
+                    .then(async () => {
+                      await useSettingsStore.getState().hydrate();
+                      await useListStore.getState().refresh();
+                      await useTaskStore.getState().refreshAll();
+                    })
+                    .catch((error) =>
+                      Alert.alert(
+                        'Could not restore',
+                        error instanceof Error ? error.message : 'Please try again.'
+                      )
+                    ),
+              },
+            ]
+          );
+        });
         await initReminders();
         await useSettingsStore.getState().hydrate();
         // Pro gates run the moment the UI is interactive, so seed entitlement
@@ -147,7 +178,10 @@ export default function RootLayout() {
         SNOOZE_MINUTES,
       }) => {
         const handle = async ({ taskId, action }: ReminderResponse) => {
+          const { whenDbIdle } = await import('@/db/exclusive');
           const { useTaskStore } = await import('@/store/taskStore');
+          // Never act on a task while a backup restore is rewriting the tables.
+          await whenDbIdle();
           const { useToastStore } = await import('@/store/toastStore');
 
           if (action === 'complete') {

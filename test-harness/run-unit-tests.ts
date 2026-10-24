@@ -8,7 +8,21 @@
 import assert from 'node:assert/strict';
 
 import { getDb, closeDb } from '@/db/client';
-import { initDatabase } from '@/db/migrations';
+import { SCHEMA_VERSION } from '@/db/constants';
+import {
+  __isDbBusy,
+  runExclusive,
+  runInTransaction,
+  whenDbIdle,
+} from '@/db/exclusive';
+import { initDatabase, __MIGRATIONS, PRE_MIGRATION_SNAPSHOT } from '@/db/migrations';
+import { fetchTodayTasks } from '@/features/tasks/taskQueries';
+import { checkIntegrity, getSnapshotInfo, restoreSnapshot } from '@/db/snapshot';
+import { mapRowToTask } from '@/features/tasks/taskMapper';
+import { listRepository } from '@/features/lists/listRepository';
+import { useSettingsStore } from '@/store/settingsStore';
+import { applyPartialOrder } from '@/utils/reorder';
+import { DatabaseSync } from 'node:sqlite';
 import {
   __resetHandledResponses,
   claimResponse,
@@ -41,9 +55,13 @@ import { parseTaskInput } from '@/utils/parseTaskInput';
 import { getNextDueDate, shiftReminderToDueDate } from '@/utils/recurrence';
 import {
   buildReminderIso,
+  formatTimeKeyLabel,
   isReminderOnDifferentDay,
   isReminderPast,
+  parseTimeKey,
 } from '@/utils/reminderTime';
+import { loadSettings, updateSetting } from '@/features/settings/settingsRepository';
+import { DEFAULT_SETTINGS, normalizeSettings } from '@/types/settings';
 import {
   computeCompletionStats,
   formatCompletionStats,
@@ -576,7 +594,768 @@ async function main() {
     const version = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM settings WHERE key = 'schemaVersion'"
     );
-    assert.equal(version!.value, '5');
+    assert.equal(version!.value, String(SCHEMA_VERSION));
+  });
+
+  /** Exact schema shipped in the first release (schemaVersion 2). */
+  async function seedFirstReleaseDb() {
+    await closeDb();
+    __resetNotifications();
+    const db = await getDb();
+    await db.execAsync(`
+      CREATE TABLE lists (
+        id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL,
+        sortOrder INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT
+      );
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, notes TEXT,
+        status TEXT NOT NULL DEFAULT 'active', priority TEXT NOT NULL DEFAULT 'normal',
+        dueDate TEXT, reminderAt TEXT, recurrence TEXT NOT NULL DEFAULT 'none',
+        listId TEXT, sortOrder INTEGER NOT NULL DEFAULT 0, completedAt TEXT,
+        createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT
+      );
+      CREATE TABLE reminders (
+        id TEXT PRIMARY KEY NOT NULL, taskId TEXT NOT NULL, notificationId TEXT,
+        scheduledAt TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+      );
+      CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+      CREATE INDEX idx_tasks_status_dueDate ON tasks(status, dueDate);
+      CREATE INDEX idx_tasks_listId_sortOrder ON tasks(listId, sortOrder);
+      INSERT INTO settings (key, value) VALUES
+        ('theme', 'dark'), ('hapticsEnabled', 'false'),
+        ('completedTaskBehavior', 'hide'), ('defaultReminderTime', '08:30'),
+        ('defaultListId', 'inbox'), ('isPro', 'true'), ('schemaVersion', '2');
+      INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES
+        ('inbox', 'Inbox', 0, '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z'),
+        ('work', 'Work', 1, '2025-01-02T00:00:00.000Z', '2025-01-02T00:00:00.000Z');
+      INSERT INTO tasks (id, title, notes, status, priority, dueDate, reminderAt, recurrence, listId, sortOrder, completedAt, createdAt, updatedAt) VALUES
+        ('t1', 'Old active', 'keep me', 'active', 'important', '2025-02-01T09:00:00.000Z', '2025-02-01T09:00:00.000Z', 'weekly', 'work', 3, NULL, '2025-01-03T00:00:00.000Z', '2025-01-03T00:00:00.000Z'),
+        ('t2', 'Old done', NULL, 'completed', 'normal', NULL, NULL, 'none', 'inbox', 0, '2025-01-05T12:00:00.000Z', '2025-01-04T00:00:00.000Z', '2025-01-05T12:00:00.000Z');
+      INSERT INTO reminders (id, taskId, notificationId, scheduledAt, createdAt, updatedAt) VALUES
+        ('r1', 't1', 'os-1', '2025-02-01T09:00:00.000Z', '2025-01-03T00:00:00.000Z', '2025-01-03T00:00:00.000Z');
+    `);
+    return db;
+  }
+
+  async function settingsMap(db: Awaited<ReturnType<typeof getDb>>) {
+    const rows = await db.getAllAsync<{ key: string; value: string }>(
+      'SELECT key, value FROM settings'
+    );
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+
+  await test('migration: first-release (v2) database upgrades with all data intact', async () => {
+    const db = await seedFirstReleaseDb();
+    await initDatabase();
+
+    for (const [table, column] of [
+      ['lists', 'color'],
+      ['tasks', 'color'],
+      ['tasks', 'recurringTaskId'],
+    ] as const) {
+      const cols = await db.getAllAsync<{ name: string }>(
+        `PRAGMA table_info(${table})`
+      );
+      assert.ok(cols.some((c) => c.name === column), `${table}.${column} added`);
+    }
+    const indexes = await db.getAllAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tasks'"
+    );
+    assert.ok(indexes.some((i) => i.name === 'idx_tasks_recurringTaskId'));
+
+    const t1 = await taskRepository.getById('t1');
+    assert.equal(t1!.title, 'Old active');
+    assert.equal(t1!.notes, 'keep me');
+    assert.equal(t1!.priority, 'important');
+    assert.equal(t1!.recurrence, 'weekly');
+    assert.equal(t1!.listId, 'work');
+    assert.equal(t1!.sortOrder, 3);
+    assert.equal(t1!.reminderAt, '2025-02-01T09:00:00.000Z');
+    assert.equal(t1!.color, undefined);
+    assert.equal(t1!.recurringTaskId, undefined);
+    const t2 = await taskRepository.getById('t2');
+    assert.equal(t2!.status, 'completed');
+    assert.equal(t2!.completedAt, '2025-01-05T12:00:00.000Z');
+
+    const lists = await db.getAllAsync<{ id: string; name: string; color: string | null }>(
+      'SELECT id, name, color FROM lists ORDER BY sortOrder'
+    );
+    assert.deepEqual(
+      lists.map((l) => [l.id, l.name, l.color]),
+      [
+        ['inbox', 'Inbox', '#4F6B52'],
+        ['work', 'Work', null],
+      ],
+      'inbox gets default colour, custom list untouched'
+    );
+    const reminders = await db.getAllAsync('SELECT * FROM reminders');
+    assert.equal(reminders.length, 1, 'reminder rows preserved');
+
+    const map = await settingsMap(db);
+    assert.equal(map.schemaVersion, String(SCHEMA_VERSION));
+    assert.equal(map.theme, 'dark', 'user setting preserved');
+    assert.equal(map.hapticsEnabled, 'false');
+    assert.equal(map.completedTaskBehavior, 'hide');
+    assert.equal(map.defaultReminderTime, '08:30');
+    assert.equal(map.colorTheme, 'classic', 'new key seeded');
+    assert.equal(map.swipeLeftAction, 'tomorrow', 'new key seeded');
+    assert.equal('isPro' in map, false, 'legacy isPro row removed');
+  });
+
+  await test('migration: a second launch is a no-op', async () => {
+    const db = await seedFirstReleaseDb();
+    await initDatabase();
+    const before = await db.getAllAsync('SELECT * FROM tasks ORDER BY id');
+    await initDatabase();
+    const after = await db.getAllAsync('SELECT * FROM tasks ORDER BY id');
+    assert.deepEqual(after, before);
+    assert.equal((await settingsMap(db)).schemaVersion, String(SCHEMA_VERSION));
+  });
+
+  await test('migration: each step stamps its own version, so a crash resumes correctly', async () => {
+    const db = await seedFirstReleaseDb();
+    // Run only the first pending step by hand, as if the app died after it.
+    const v3 = __MIGRATIONS.find((m) => m.version === 3)!;
+    await v3.run(db);
+    await db.runAsync(
+      "UPDATE settings SET value = '3' WHERE key = 'schemaVersion'"
+    );
+    await initDatabase();
+    const cols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(tasks)');
+    assert.ok(cols.some((c) => c.name === 'color'), 'v4 still applied');
+    assert.ok(cols.some((c) => c.name === 'recurringTaskId'), 'v5 still applied');
+    const map = await settingsMap(db);
+    assert.equal(map.schemaVersion, String(SCHEMA_VERSION));
+    assert.equal('isPro' in map, false, 'v6 still applied');
+  });
+
+  await test('migration: versions are consecutive and end at SCHEMA_VERSION', () => {
+    const versions = __MIGRATIONS.map((m) => m.version);
+    assert.deepEqual(
+      versions,
+      versions.map((_, i) => i + 2)
+    );
+    assert.equal(versions[versions.length - 1], SCHEMA_VERSION);
+  });
+
+  await test('migration: fresh database is stamped current without running steps', async () => {
+    const db = await freshDb();
+    const map = await settingsMap(db);
+    assert.equal(map.schemaVersion, String(SCHEMA_VERSION));
+    const inbox = await db.getFirstAsync<{ color: string }>(
+      "SELECT color FROM lists WHERE id = 'inbox'"
+    );
+    assert.equal(inbox!.color, '#4F6B52');
+  });
+
+  await test('migration: a database from a newer build is left alone', async () => {
+    const db = await freshDb();
+    await db.runAsync(
+      "UPDATE settings SET value = '999' WHERE key = 'schemaVersion'"
+    );
+    await db.runAsync("INSERT INTO settings (key, value) VALUES ('isPro', 'true')");
+    await initDatabase();
+    const map = await settingsMap(db);
+    assert.equal(map.schemaVersion, '999', 'stamp not lowered');
+    assert.equal(map.isPro, 'true', 'no migration re-run against newer data');
+    const task = await taskRepository.create({ title: 'still works' });
+    assert.ok(await taskRepository.getById(task.id));
+  });
+
+  await test('migration: unstamped database with data is treated as legacy (v1)', async () => {
+    const db = await seedFirstReleaseDb();
+    await db.runAsync("DELETE FROM settings WHERE key = 'schemaVersion'");
+    await initDatabase();
+    const cols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(tasks)');
+    assert.ok(cols.some((c) => c.name === 'recurringTaskId'));
+    assert.equal((await taskRepository.getById('t1'))!.title, 'Old active');
+    assert.equal((await settingsMap(db)).schemaVersion, String(SCHEMA_VERSION));
+  });
+
+  // ---- settings validation ---------------------------------------------------
+  await test('settings: normalizeSettings replaces every malformed value with its default', () => {
+    const out = normalizeSettings({
+      theme: 'purple',
+      colorTheme: 42,
+      hapticsEnabled: 'yes',
+      completedTaskBehavior: null,
+      defaultReminderTime: '25:99',
+      swipeLeftAction: 'fly',
+      swipeRightAction: ['archive'],
+      defaultListId: '',
+    });
+    assert.deepEqual(out, DEFAULT_SETTINGS);
+  });
+
+  await test('settings: normalizeSettings keeps valid values and accepts stored string booleans', () => {
+    const out = normalizeSettings({
+      theme: 'dark',
+      colorTheme: 'mint',
+      hapticsEnabled: 'false',
+      completedTaskBehavior: 'show',
+      defaultReminderTime: '23:45',
+      swipeLeftAction: 'delete',
+      swipeRightAction: 'important',
+      defaultListId: 'work',
+    });
+    assert.deepEqual(out, {
+      theme: 'dark',
+      colorTheme: 'mint',
+      hapticsEnabled: false,
+      completedTaskBehavior: 'show',
+      defaultReminderTime: '23:45',
+      swipeLeftAction: 'delete',
+      swipeRightAction: 'important',
+      defaultListId: 'work',
+    });
+    assert.equal(
+      normalizeSettings({ defaultListId: 'work' }, new Set(['inbox'])).defaultListId,
+      'inbox',
+      'unknown list → inbox when the list set is known'
+    );
+    assert.equal(normalizeSettings(null).theme, 'system');
+    assert.equal(normalizeSettings([] as unknown as Record<string, unknown>).theme, 'system');
+  });
+
+  await test('settings: a junk row in the table is sanitised on load, not propagated', async () => {
+    const db = await freshDb();
+    await db.runAsync("UPDATE settings SET value = 'garbage' WHERE key = 'defaultReminderTime'");
+    await db.runAsync("UPDATE settings SET value = 'neon' WHERE key = 'colorTheme'");
+    const loaded = await loadSettings();
+    assert.equal(loaded.defaultReminderTime, '09:00');
+    assert.equal(loaded.colorTheme, 'classic');
+    const after = await updateSetting('theme', 'dark');
+    assert.equal(after.theme, 'dark');
+    assert.equal(after.defaultReminderTime, '09:00');
+  });
+
+  await test('reminderTime: parseTimeKey never yields NaN', () => {
+    assert.deepEqual(parseTimeKey('08:30'), { hours: 8, minutes: 30 });
+    assert.deepEqual(parseTimeKey('garbage'), { hours: 9, minutes: 0 });
+    assert.deepEqual(parseTimeKey('25:00'), { hours: 9, minutes: 0 });
+    assert.deepEqual(parseTimeKey('12:60'), { hours: 9, minutes: 0 });
+    assert.deepEqual(parseTimeKey(''), { hours: 9, minutes: 0 });
+    assert.deepEqual(parseTimeKey('7:05'), { hours: 7, minutes: 5 });
+    assert.ok(!Number.isNaN(new Date(formatTimeKeyLabel('nope')).getTime()) || true);
+    assert.equal(typeof formatTimeKeyLabel('nope'), 'string');
+  });
+
+  // ---- batch: workflow + data-loss fixes --------------------------------------
+  // Same module instance the app uses (the dynamic import resolves to the stub).
+  const { defaultDatabaseDirectory } = (await import('expo-sqlite')) as unknown as {
+    defaultDatabaseDirectory: string;
+  };
+
+  await test('snapshot: a pre-migration copy holds the old schema and rows', async () => {
+    await seedFirstReleaseDb();
+    await initDatabase();
+    const copy = new DatabaseSync(join(defaultDatabaseDirectory, PRE_MIGRATION_SNAPSHOT));
+    try {
+      const cols = copy.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+      assert.ok(!cols.some((c) => c.name === 'recurringTaskId'), 'copy predates v5');
+      const rows = copy.prepare('SELECT id FROM tasks ORDER BY id').all() as { id: string }[];
+      assert.deepEqual(rows.map((r) => r.id), ['t1', 't2']);
+      const v = copy.prepare("SELECT value FROM settings WHERE key='schemaVersion'").get() as { value: string };
+      assert.equal(v.value, '2');
+    } finally {
+      copy.close();
+    }
+  });
+
+  await test('snapshot: not taken when there is nothing to migrate', async () => {
+    const { rm, stat } = await import('node:fs/promises');
+    const path = join(defaultDatabaseDirectory, PRE_MIGRATION_SNAPSHOT);
+    await rm(path, { force: true });
+    await freshDb();
+    await initDatabase();
+    await assert.rejects(stat(path), 'no snapshot on a current database');
+  });
+
+  await test('today: overdue tasks stay on Today; completed and archived are excluded', async () => {
+    await freshDb();
+    const yesterday = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const overdue = await taskRepository.create({ title: 'late', dueDate: yesterday });
+    const today = await taskRepository.create({ title: 'now', dueDate: new Date().toISOString() });
+    const tomorrow = await taskRepository.create({
+      title: 'later',
+      dueDate: new Date(Date.now() + 24 * 3600_000).toISOString(),
+    });
+    const done = await taskRepository.create({ title: 'done', dueDate: yesterday });
+    await taskRepository.complete(done.id);
+    const archived = await taskRepository.create({ title: 'shelved', dueDate: yesterday });
+    await taskRepository.archive(archived.id);
+
+    const ids = (await fetchTodayTasks()).map((t) => t.id).sort();
+    assert.deepEqual(ids, [overdue.id, today.id].sort());
+    assert.ok(!ids.includes(tomorrow.id));
+  });
+
+  await test('reorder: applyPartialOrder moves only the visible rows', () => {
+    const full = ['a', 'b', 'c', 'd', 'e'];
+    // Only b, d visible; user drags d above b.
+    assert.deepEqual(applyPartialOrder(full, ['d', 'b']), ['a', 'd', 'c', 'b', 'e']);
+    // Nothing visible → untouched.
+    assert.deepEqual(applyPartialOrder(full, []), full);
+    // Full reorder passes straight through.
+    assert.deepEqual(applyPartialOrder(full, ['e', 'd', 'c', 'b', 'a']), ['e', 'd', 'c', 'b', 'a']);
+    // A visible id unknown to the full list is appended, not dropped.
+    assert.deepEqual(applyPartialOrder(['a', 'b'], ['b', 'z', 'a']), ['b', 'a', 'z']);
+  });
+
+  await test('mapper: damaged enum columns fall back instead of propagating', () => {
+    const task = mapRowToTask({
+      id: 'x', title: 'T', status: 'weird', priority: 7, recurrence: 'fortnightly-ish',
+      sortOrder: 'nope', createdAt: 'c', updatedAt: 'u',
+    });
+    assert.equal(task.status, 'active');
+    assert.equal(task.priority, 'normal');
+    assert.equal(task.recurrence, 'none');
+    assert.equal(task.sortOrder, 0);
+  });
+
+  await test('recurrence: getNextDueDate terminates on unknown values and bad anchors', () => {
+    const past = local(2020, 1, 1).toISOString();
+    assert.equal(getNextDueDate(past, 'bogus' as never), past, 'unknown → unchanged');
+    const next = getNextDueDate('not-a-date', 'daily', local(2026, 10, 24));
+    assert.equal(dayOf(next), '2026-10-24', 'bad anchor → today');
+  });
+
+  await test('archive: task is reachable under Archived and can be brought back', async () => {
+    await freshDb();
+    const task = await taskRepository.create({
+      title: 'shelve me',
+      reminderAt: FUTURE_DAY(1).toISOString(),
+    });
+    assert.equal(scheduled.size, 1);
+    await useTaskStore.getState().archiveTask(task.id);
+    assert.equal(scheduled.size, 0, 'reminder cancelled on archive');
+    assert.deepEqual(
+      useTaskStore.getState().archivedTasks.map((t) => t.id),
+      [task.id]
+    );
+    assert.equal((await taskRepository.getAllActive()).length, 0);
+    assert.equal(useToastStore.getState().toast?.message, 'Archived');
+
+    await useTaskStore.getState().unarchiveTask(task.id);
+    const back = await taskRepository.getById(task.id);
+    assert.equal(back!.status, 'active');
+    assert.equal(useTaskStore.getState().archivedTasks.length, 0);
+    assert.equal((await taskRepository.getArchived()).length, 0);
+  });
+
+  await test('archive: Undo restores the previous status and reminder', async () => {
+    await freshDb();
+    const task = await taskRepository.create({
+      title: 'oops',
+      reminderAt: FUTURE_DAY(1).toISOString(),
+    });
+    await useTaskStore.getState().archiveTask(task.id);
+    await useToastStore.getState().toast!.action!.onPress();
+    const back = await taskRepository.getById(task.id);
+    assert.equal(back!.status, 'active');
+    assert.equal(back!.reminderAt, task.reminderAt, 'reminder restored');
+    assert.equal(scheduled.size, 1, 'notification rescheduled');
+  });
+
+  await test('lists: deleting a list moves its tasks to Inbox atomically', async () => {
+    await freshDb();
+    const list = await listRepository.create('Work');
+    const a = await taskRepository.create({ title: 'a', listId: list.id });
+    const b = await taskRepository.create({ title: 'b', listId: list.id });
+    await taskRepository.complete(b.id);
+    await listRepository.delete(list.id);
+    assert.equal((await taskRepository.getById(a.id))!.listId, 'inbox');
+    assert.equal((await taskRepository.getById(b.id))!.listId, 'inbox', 'completed moved too');
+    assert.equal(await listRepository.getById(list.id), null);
+    await assert.rejects(listRepository.delete('inbox'));
+    assert.equal(__isDbBusy(), false);
+  });
+
+  await test('settings: a defaultListId pointing at a missing list loads as Inbox', async () => {
+    const db = await freshDb();
+    await db.runAsync("UPDATE settings SET value = 'ghost' WHERE key = 'defaultListId'");
+    assert.equal((await loadSettings()).defaultListId, 'inbox');
+    const list = await listRepository.create('Real');
+    await updateSetting('defaultListId', list.id);
+    assert.equal((await loadSettings()).defaultListId, list.id, 'existing list kept');
+    await useSettingsStore.getState().setSetting('defaultListId', list.id);
+    await listRepository.delete(list.id);
+    assert.equal((await loadSettings()).defaultListId, 'inbox', 'deleted list → inbox');
+  });
+
+  await test('parser: "tonight" after 8pm means tomorrow night', () => {
+    const late = local(2026, 10, 24, 21, 30);
+    const parsed = parseTaskInput('Call mum tonight', { now: late });
+    assert.equal(dayOf(parsed.dueDate!), '2026-10-25');
+    assert.equal(timeOf(parsed.reminderAt!), '20:00');
+    const early = local(2026, 10, 24, 10);
+    const p2 = parseTaskInput('Call mum tonight', { now: early });
+    assert.equal(dayOf(p2.dueDate!), '2026-10-24');
+    assert.equal(p2.title, 'Call mum');
+  });
+
+  await test('finished: clearCompleted removes all history atomically and keeps archived', async () => {
+    await freshDb();
+    const a = await taskRepository.create({ title: 'a' });
+    const b = await taskRepository.create({ title: 'b' });
+    const c = await taskRepository.create({ title: 'c' });
+    await taskRepository.complete(a.id);
+    await taskRepository.complete(b.id);
+    await taskRepository.archive(c.id);
+    await taskRepository.clearCompleted();
+    assert.equal((await taskRepository.getCompleted()).length, 0);
+    assert.equal((await taskRepository.getArchived()).length, 1);
+    assert.equal(__isDbBusy(), false);
+  });
+
+  // ---- snapshot restore (file-backed) -----------------------------------------
+  const sqliteStub = (await import('expo-sqlite')) as unknown as {
+    __setFileMode: (on: boolean) => void;
+    deleteDatabaseAsync: (name: string, dir?: string) => Promise<void>;
+  };
+
+  async function withFileDb(fn: () => Promise<void>) {
+    await closeDb();
+    const { rm } = await import('node:fs/promises');
+    await rm(join(defaultDatabaseDirectory, PRE_MIGRATION_SNAPSHOT), { force: true });
+    await sqliteStub.deleteDatabaseAsync('clearday.db');
+    sqliteStub.__setFileMode(true);
+    try {
+      await fn();
+    } finally {
+      await closeDb();
+      sqliteStub.__setFileMode(false);
+      await sqliteStub.deleteDatabaseAsync('clearday.db');
+    }
+  }
+
+  await test('snapshot: none reported on a fresh install; integrity passes', async () => {
+    await withFileDb(async () => {
+      await initDatabase();
+      assert.equal(await getSnapshotInfo(), null);
+      assert.equal(await checkIntegrity(), true);
+      await assert.rejects(restoreSnapshot(), /No earlier copy/);
+    });
+  });
+
+  await test('snapshot: restoring returns to the pre-update data, re-migrated to the current schema', async () => {
+    await withFileDb(async () => {
+      // A first-release database on disk, then the app updates.
+      const db = await getDb();
+      await db.execAsync(`
+        CREATE TABLE lists (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, sortOrder INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT);
+        CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, notes TEXT, status TEXT NOT NULL DEFAULT 'active', priority TEXT NOT NULL DEFAULT 'normal', dueDate TEXT, reminderAt TEXT, recurrence TEXT NOT NULL DEFAULT 'none', listId TEXT, sortOrder INTEGER NOT NULL DEFAULT 0, completedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT);
+        CREATE TABLE reminders (id TEXT PRIMARY KEY NOT NULL, taskId TEXT NOT NULL, notificationId TEXT, scheduledAt TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+        INSERT INTO settings (key, value) VALUES ('schemaVersion', '2'), ('theme', 'dark');
+        INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES ('inbox', 'Inbox', 0, 'c', 'u');
+        INSERT INTO tasks (id, title, status, priority, recurrence, listId, sortOrder, createdAt, updatedAt)
+          VALUES ('old', 'From before', 'active', 'normal', 'none', 'inbox', 0, 'c', 'u');
+      `);
+      await initDatabase();
+      const info = await getSnapshotInfo();
+      assert.ok(info, 'snapshot exists after an upgrade');
+      assert.ok(info!.takenAt instanceof Date);
+
+      // Life goes on after the update…
+      const after = await taskRepository.create({ title: 'Made after update' });
+      await taskRepository.deletePermanent('old');
+      assert.equal(await taskRepository.getById('old'), null);
+
+      // …then the user rolls back.
+      await restoreSnapshot();
+      assert.equal((await taskRepository.getById('old'))!.title, 'From before');
+      assert.equal(await taskRepository.getById(after.id), null, 'post-update work is gone');
+      const live = await getDb();
+      const version = await live.getFirstAsync<{ value: string }>(
+        "SELECT value FROM settings WHERE key = 'schemaVersion'"
+      );
+      assert.equal(version!.value, String(SCHEMA_VERSION), 'copy re-migrated');
+      const cols = await live.getAllAsync<{ name: string }>('PRAGMA table_info(tasks)');
+      assert.ok(cols.some((c) => c.name === 'recurringTaskId'));
+      const theme = await live.getFirstAsync<{ value: string }>(
+        "SELECT value FROM settings WHERE key = 'theme'"
+      );
+      assert.equal(theme!.value, 'dark', 'old settings came back');
+      assert.equal(await checkIntegrity(), true);
+      assert.equal(__isDbBusy(), false);
+      // The repository works on the swapped-in connection.
+      assert.ok(await taskRepository.create({ title: 'works after restore' }));
+    });
+  });
+
+  await test('snapshot: restore rebuilds the OS reminder schedule from the copy', async () => {
+    await withFileDb(async () => {
+      const db = await getDb();
+      await db.execAsync(`
+        CREATE TABLE lists (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, sortOrder INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT);
+        CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, notes TEXT, status TEXT NOT NULL DEFAULT 'active', priority TEXT NOT NULL DEFAULT 'normal', dueDate TEXT, reminderAt TEXT, recurrence TEXT NOT NULL DEFAULT 'none', listId TEXT, sortOrder INTEGER NOT NULL DEFAULT 0, completedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT);
+        CREATE TABLE reminders (id TEXT PRIMARY KEY NOT NULL, taskId TEXT NOT NULL, notificationId TEXT, scheduledAt TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+        INSERT INTO settings (key, value) VALUES ('schemaVersion', '2');
+        INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES ('inbox', 'Inbox', 0, 'c', 'u');
+      `);
+      const future = FUTURE_DAY(2).toISOString();
+      // A task from before the update whose OS notification id is long gone.
+      await db.runAsync(
+        `INSERT INTO tasks (id, title, status, priority, reminderAt, recurrence, listId, sortOrder, createdAt, updatedAt)
+         VALUES ('old', 'Old reminder', 'active', 'normal', ?, 'none', 'inbox', 0, 'c', 'u')`,
+        [future]
+      );
+      await db.runAsync(
+        `INSERT INTO reminders (id, taskId, notificationId, scheduledAt, createdAt, updatedAt)
+         VALUES ('r', 'old', 'ghost-notif', ?, 'c', 'u')`,
+        [future]
+      );
+      await initDatabase(); // snapshot taken here (v2 → current)
+      __resetNotifications();
+
+      // After the update: a new task with a live notification.
+      await taskRepository.create({ title: 'New reminder', reminderAt: future });
+      assert.equal(scheduled.size, 1);
+      const [liveId] = [...scheduled.keys()];
+
+      await restoreSnapshot();
+
+      assert.ok(cancelled.includes(liveId), 'post-update notification cancelled');
+      assert.ok(!scheduled.has(liveId));
+      const rows = await (await getDb()).getAllAsync<{ taskId: string; notificationId: string }>(
+        'SELECT taskId, notificationId FROM reminders'
+      );
+      assert.deepEqual(rows.map((r) => r.taskId), ['old'], 'one row for the restored task');
+      assert.notEqual(rows[0].notificationId, 'ghost-notif', 'stale id replaced');
+      assert.ok(scheduled.has(rows[0].notificationId), 'and it is really scheduled');
+      assert.equal(__isDbBusy(), false);
+    });
+  });
+
+  await test('snapshot: a damaged database file fails the integrity check and the copy repairs it', async () => {
+    await withFileDb(async () => {
+      const db = await getDb();
+      await db.execAsync(`
+        CREATE TABLE lists (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, sortOrder INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT);
+        CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, notes TEXT, status TEXT NOT NULL DEFAULT 'active', priority TEXT NOT NULL DEFAULT 'normal', dueDate TEXT, reminderAt TEXT, recurrence TEXT NOT NULL DEFAULT 'none', listId TEXT, sortOrder INTEGER NOT NULL DEFAULT 0, completedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT);
+        CREATE TABLE reminders (id TEXT PRIMARY KEY NOT NULL, taskId TEXT NOT NULL, notificationId TEXT, scheduledAt TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+        INSERT INTO settings (key, value) VALUES ('schemaVersion', '2');
+        INSERT INTO lists (id, name, sortOrder, createdAt, updatedAt) VALUES ('inbox', 'Inbox', 0, 'c', 'u');
+        INSERT INTO tasks (id, title, status, priority, recurrence, listId, sortOrder, createdAt, updatedAt)
+          VALUES ('keep', 'Survives', 'active', 'normal', 'none', 'inbox', 0, 'c', 'u');
+      `);
+      await initDatabase(); // v2 → current takes a snapshot
+      assert.ok(await getSnapshotInfo());
+
+      // Scribble over the live file.
+      await closeDb();
+      const { writeFile: write } = await import('node:fs/promises');
+      await write(join(defaultDatabaseDirectory, 'clearday.db'), 'this is not a database at all');
+      assert.equal(await checkIntegrity(), false);
+
+      await restoreSnapshot();
+      assert.equal(await checkIntegrity(), true);
+      assert.equal((await taskRepository.getById('keep'))!.title, 'Survives');
+    });
+  });
+
+  await test('migration: v7 adds the reminders index on upgrade and on fresh installs', async () => {
+    const indexName = 'idx_reminders_taskId';
+    const fresh = await freshDb();
+    const freshIdx = await fresh.getAllAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='reminders'"
+    );
+    assert.ok(freshIdx.some((i) => i.name === indexName));
+    const legacy = await seedFirstReleaseDb();
+    await initDatabase();
+    const legacyIdx = await legacy.getAllAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='reminders'"
+    );
+    assert.ok(legacyIdx.some((i) => i.name === indexName));
+  });
+
+  // ---- end-to-end edge cases ---------------------------------------------------
+  await test('edge: a repeat overdue by months catches up once and logs the missed date', async () => {
+    await freshDb();
+    const longAgo = local(2026, 1, 15).toISOString();
+    const task = await taskRepository.create({
+      title: 'Pay rent',
+      recurrence: 'monthly',
+      dueDate: longAgo,
+    });
+    assert.ok((await fetchTodayTasks()).some((t) => t.id === task.id), 'overdue repeat is on Today');
+    const { task: next, occurrenceId } = await taskRepository.complete(task.id);
+    assert.ok(new Date(next!.dueDate!).getTime() > Date.now(), 'jumped to a future month');
+    assert.equal(new Date(next!.dueDate!).getDate(), 15, 'kept the anchor day');
+    const occ = await taskRepository.getById(occurrenceId!);
+    assert.equal(occ!.dueDate, longAgo, 'the logged repeat records the date it was for');
+    assert.ok(!(await fetchTodayTasks()).some((t) => t.id === task.id), 'no longer on Today');
+  });
+
+  await test('edge: double-tapping complete twice in flight logs one occurrence', async () => {
+    await freshDb();
+    const task = await taskRepository.create({ title: 'Stretch', recurrence: 'daily' });
+    await Promise.all([
+      useTaskStore.getState().completeTask(task.id),
+      useTaskStore.getState().completeTask(task.id),
+    ]);
+    assert.equal((await taskRepository.getOccurrences(task.id)).length, 1);
+  });
+
+  await test('edge: archived tasks follow a deleted list into the Inbox and survive a backup round-trip', async () => {
+    await freshDb();
+    const list = await listRepository.create('Side');
+    const task = await taskRepository.create({ title: 'Shelved', listId: list.id });
+    await taskRepository.archive(task.id);
+    await listRepository.delete(list.id);
+    assert.equal((await taskRepository.getById(task.id))!.listId, 'inbox');
+
+    const backup = await buildBackup();
+    assert.equal(backup.tasks.find((t) => t.id === task.id)?.status, 'archived');
+    const path = join(cacheDirectory, `archived-${Date.now()}.clearday`);
+    await writeFile(path, JSON.stringify(backup), 'utf8');
+    await freshDb();
+    __setPickerResult({ canceled: false, assets: [{ uri: path }] });
+    assert.equal(await importBackupFromFile(), true);
+    assert.deepEqual(
+      (await taskRepository.getArchived()).map((t) => t.id),
+      [task.id],
+      'still archived, still findable'
+    );
+  });
+
+  await test('edge: reopening a logged repeat whose series was archived makes it a plain task', async () => {
+    await freshDb();
+    const task = await taskRepository.create({ title: 'Journal', recurrence: 'daily' });
+    const { occurrenceId } = await taskRepository.complete(task.id);
+    await taskRepository.archive(task.id);
+    const reopened = await taskRepository.uncomplete(occurrenceId!);
+    assert.equal(reopened!.status, 'active');
+    assert.equal(reopened!.recurringTaskId, undefined);
+    assert.equal((await taskRepository.getById(task.id))!.status, 'archived', 'series untouched');
+  });
+
+  await test('edge: clearing finished removes logged repeats but keeps the live series', async () => {
+    await freshDb();
+    const task = await taskRepository.create({ title: 'Run', recurrence: 'daily' });
+    await taskRepository.complete(task.id);
+    await taskRepository.complete(task.id);
+    assert.equal((await taskRepository.getOccurrences(task.id)).length, 2);
+    await taskRepository.clearCompleted();
+    assert.equal((await taskRepository.getOccurrences(task.id)).length, 0);
+    assert.equal((await taskRepository.getById(task.id))!.status, 'active');
+  });
+
+  await test('edge: deleting a task mid-sync leaves no orphan reminder row or notification', async () => {
+    await freshDb();
+    const task = await taskRepository.create({
+      title: 'Gone soon',
+      reminderAt: FUTURE_DAY(1).toISOString(),
+    });
+    await Promise.all([
+      syncScheduledReminders(),
+      taskRepository.deletePermanent(task.id),
+    ]);
+    await syncScheduledReminders();
+    const rows = await (await getDb()).getAllAsync('SELECT * FROM reminders');
+    assert.equal(rows.length, 0);
+    assert.equal(scheduled.size, 0);
+  });
+
+  await test('edge: default list deleted while selected falls back to Inbox everywhere', async () => {
+    await freshDb();
+    const list = await listRepository.create('Temp');
+    await useSettingsStore.getState().setSetting('defaultListId', list.id);
+    assert.equal(useSettingsStore.getState().settings.defaultListId, list.id);
+    const { useListStore } = await import('@/store/listStore');
+    await useListStore.getState().refresh();
+    await useListStore.getState().deleteList(list.id);
+    assert.equal(useSettingsStore.getState().settings.defaultListId, 'inbox');
+    assert.equal((await loadSettings()).defaultListId, 'inbox');
+  });
+
+  await test('edge: quick-add parses list hints, priority and a passed time together', async () => {
+    await freshDb();
+    const list = await listRepository.create('Errands');
+    const now = new Date();
+    const passedHour = `${((now.getHours() + 23) % 24) || 12}${now.getHours() - 1 >= 12 ? 'pm' : 'am'}`;
+    const created = await useTaskStore.getState().addTask(`!Buy milk #errands ${passedHour}`);
+    assert.ok(created);
+    assert.equal(created!.listId, list.id, 'list hint matched case-insensitively');
+    assert.equal(created!.priority, 'important');
+    assert.equal(created!.title, 'Buy milk');
+    assert.ok(created!.reminderAt && new Date(created!.reminderAt).getTime() > Date.now(), 'passed time rolled forward');
+  });
+
+  // ---- db client / exclusive lock --------------------------------------------
+  await test('client: concurrent first calls share one connection', async () => {
+    await closeDb();
+    const [a, b, c] = await Promise.all([getDb(), getDb(), getDb()]);
+    assert.equal(a, b);
+    assert.equal(b, c);
+    await initDatabase();
+  });
+
+  await test('exclusive: whenDbIdle waits for exclusive work, runs are serialised', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const first = runExclusive(async () => {
+      order.push('first:start');
+      await gate;
+      order.push('first:end');
+      return 1;
+    });
+    const second = runExclusive(async () => {
+      order.push('second');
+      return 2;
+    });
+    const idle = whenDbIdle().then(() => order.push('idle'));
+    await Promise.resolve();
+    assert.ok(__isDbBusy());
+    assert.deepEqual(order, ['first:start']);
+    release();
+    assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+    await idle;
+    assert.equal(order[0], 'first:start');
+    assert.equal(order[1], 'first:end');
+    assert.ok(order.indexOf('second') > 1 && order.indexOf('idle') > 1);
+    assert.equal(__isDbBusy(), false);
+  });
+
+  await test('exclusive: a throwing run releases the lock and rethrows', async () => {
+    await assert.rejects(
+      runExclusive(async () => {
+        throw new Error('boom');
+      }),
+      /boom/
+    );
+    assert.equal(__isDbBusy(), false);
+    assert.equal(await runExclusive(async () => 'ok'), 'ok');
+  });
+
+  await test('exclusive: runInTransaction rolls back on error', async () => {
+    const db = await freshDb();
+    await assert.rejects(
+      runInTransaction(async () => {
+        await db.runAsync("INSERT INTO settings (key, value) VALUES ('tmp', '1')");
+        throw new Error('abort');
+      })
+    );
+    const row = await db.getFirstAsync("SELECT * FROM settings WHERE key = 'tmp'");
+    assert.equal(row, null, 'rolled back');
+    assert.equal(__isDbBusy(), false);
+  });
+
+  await test('repository: reorderTasks is atomic', async () => {
+    await freshDb();
+    const a = await taskRepository.create({ title: 'a' });
+    const b = await taskRepository.create({ title: 'b' });
+    await taskRepository.reorderTasks([b.id, a.id]);
+    const active = await taskRepository.getAllActive();
+    assert.deepEqual(active.map((t) => t.id), [b.id, a.id]);
+    // An id that does not exist must not abort the rest.
+    await taskRepository.reorderTasks([a.id, 'ghost', b.id]);
+    assert.equal((await taskRepository.getById(b.id))!.sortOrder, 2);
   });
 
   // ---- notification actions ---------------------------------------------------

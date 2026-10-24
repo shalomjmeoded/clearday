@@ -5,6 +5,8 @@ import type { Task } from '@/types/task';
 export type ClearDayBackup = {
   version: number;
   exportedAt: string;
+  /** App version that wrote the file; informational, lets a future importer explain a mismatch. */
+  appVersion?: string;
   tasks: Task[];
   lists: TaskList[];
   settings: Record<string, unknown>;

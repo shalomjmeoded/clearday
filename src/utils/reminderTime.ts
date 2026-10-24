@@ -15,9 +15,12 @@ export function formatTimeKey(hours: number, minutes: number): string {
   return `${padTimeUnit(hours)}:${padTimeUnit(minutes)}`;
 }
 
+/** Parses "HH:mm"; anything malformed falls back to 09:00 rather than NaN. */
 export function parseTimeKey(key: string): { hours: number; minutes: number } {
   const [h, m] = key.split(':').map(Number);
-  return { hours: h ?? 9, minutes: m ?? 0 };
+  const valid =
+    Number.isInteger(h) && Number.isInteger(m) && h >= 0 && h < 24 && m >= 0 && m < 60;
+  return valid ? { hours: h, minutes: m } : { hours: 9, minutes: 0 };
 }
 
 export function formatTimeKeyLabel(key: string): string {

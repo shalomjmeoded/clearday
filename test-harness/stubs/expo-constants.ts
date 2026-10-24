@@ -4,4 +4,7 @@ export enum ExecutionEnvironment {
   StoreClient = 'storeClient',
 }
 
-export default { executionEnvironment: ExecutionEnvironment.Bare };
+export default {
+  executionEnvironment: ExecutionEnvironment.Bare,
+  expoConfig: { version: '9.9.9-test' },
+};

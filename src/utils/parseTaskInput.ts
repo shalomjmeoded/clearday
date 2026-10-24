@@ -154,10 +154,14 @@ export function parseTaskInput(
       continue;
     }
     if (lower === 'tonight') {
-      baseDay = startOfDay(now);
+      // Past 8pm, "tonight" would ring immediately; treat it as tomorrow
+      // night, the same way a bare passed time rolls forward.
+      let evening = setHours(setMinutes(startOfDay(now), 0), 20);
+      if (evening.getTime() <= now.getTime()) evening = addDays(evening, 1);
+      baseDay = startOfDay(evening);
       dueDate = baseDay;
       explicitDay = true;
-      reminderAt = setHours(setMinutes(baseDay, 0), 20);
+      reminderAt = evening;
       continue;
     }
     if (lower === 'tomorrow') {

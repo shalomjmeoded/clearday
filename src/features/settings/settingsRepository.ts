@@ -1,44 +1,24 @@
-import { INBOX_LIST_ID } from '@/db/constants';
 import { getDb } from '@/db/client';
 import {
-  DEFAULT_SETTINGS,
+  normalizeSettings,
+  serializeSetting,
   type AppSettings,
-  type ColorTheme,
-  type CompletedTaskBehavior,
-  type TaskSwipeAction,
-  type ThemeMode,
 } from '@/types/settings';
-
-function parseSettings(rows: { key: string; value: string }[]): AppSettings {
-  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-  return {
-    theme: (map.theme as ThemeMode) ?? DEFAULT_SETTINGS.theme,
-    colorTheme: (map.colorTheme as ColorTheme) ?? DEFAULT_SETTINGS.colorTheme,
-    hapticsEnabled:
-      map.hapticsEnabled === undefined
-        ? DEFAULT_SETTINGS.hapticsEnabled
-        : map.hapticsEnabled === 'true',
-    completedTaskBehavior:
-      (map.completedTaskBehavior as CompletedTaskBehavior) ??
-      DEFAULT_SETTINGS.completedTaskBehavior,
-    defaultReminderTime:
-      map.defaultReminderTime ?? DEFAULT_SETTINGS.defaultReminderTime,
-    swipeLeftAction:
-      (map.swipeLeftAction as TaskSwipeAction) ??
-      DEFAULT_SETTINGS.swipeLeftAction,
-    swipeRightAction:
-      (map.swipeRightAction as TaskSwipeAction) ??
-      DEFAULT_SETTINGS.swipeRightAction,
-    defaultListId: map.defaultListId ?? DEFAULT_SETTINGS.defaultListId ?? INBOX_LIST_ID,
-  };
-}
 
 export async function loadSettings(): Promise<AppSettings> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ key: string; value: string }>(
     'SELECT key, value FROM settings'
   );
-  return parseSettings(rows);
+  // Today shows only the default list, so a stale id here would blank the
+  // screen with no explanation; fall back to the Inbox instead.
+  const lists = await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM lists WHERE deletedAt IS NULL'
+  );
+  return normalizeSettings(
+    Object.fromEntries(rows.map((r) => [r.key, r.value])),
+    new Set(lists.map((l) => l.id))
+  );
 }
 
 export async function updateSetting<K extends keyof AppSettings>(
@@ -46,11 +26,9 @@ export async function updateSetting<K extends keyof AppSettings>(
   value: AppSettings[K]
 ): Promise<AppSettings> {
   const db = await getDb();
-  const stringValue =
-    typeof value === 'boolean' ? String(value) : String(value);
   await db.runAsync(
     'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-    [key, stringValue]
+    [key, serializeSetting(key, value)]
   );
   return loadSettings();
 }

@@ -14,13 +14,16 @@ import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
 import { triggerLightHaptic } from '@/utils/haptics';
 
-type Section = { title: string; data: Task[] };
+type Section = { title: string; data: Task[]; archived?: boolean };
 
 export default function FinishedTasksScreen() {
   const { tokens } = useTheme();
   const doneTasks = useTaskStore((s) => s.doneTasks);
+  const archivedTasks = useTaskStore((s) => s.archivedTasks);
   const refreshDone = useTaskStore((s) => s.refreshDone);
+  const refreshArchived = useTaskStore((s) => s.refreshArchived);
   const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
+  const unarchiveTask = useTaskStore((s) => s.unarchiveTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const setImportant = useTaskStore((s) => s.setImportant);
@@ -30,7 +33,8 @@ export default function FinishedTasksScreen() {
   useFocusEffect(
     useCallback(() => {
       refreshDone();
-    }, [refreshDone])
+      refreshArchived();
+    }, [refreshDone, refreshArchived])
   );
 
   const sections = useMemo((): Section[] => {
@@ -43,8 +47,17 @@ export default function FinishedTasksScreen() {
       list.push(task);
       groups.set(key, list);
     }
-    return [...groups.entries()].map(([title, data]) => ({ title, data }));
-  }, [doneTasks]);
+    const result: Section[] = [...groups.entries()].map(([title, data]) => ({
+      title,
+      data,
+    }));
+    // Archived tasks are out of every list, so this is the one place they
+    // can be found and brought back.
+    if (archivedTasks.length > 0) {
+      result.push({ title: 'Archived', data: archivedTasks, archived: true });
+    }
+    return result;
+  }, [archivedTasks, doneTasks]);
 
   const confirmClear = () => {
     Alert.alert(
@@ -100,13 +113,18 @@ export default function FinishedTasksScreen() {
               {section.title}
             </Text>
           )}
-          renderItem={({ item }) => (
+          renderItem={({ item, section }) => (
             <TaskRow
               task={item}
               colorMark={item.color}
-              onComplete={() => uncompleteTask(item.id)}
+              restoreMode={Boolean(section.archived)}
+              onComplete={() =>
+                section.archived ? unarchiveTask(item.id) : uncompleteTask(item.id)
+              }
               onPress={() => router.push(`/task/${item.id}`)}
-              onArchive={() => archiveTask(item.id)}
+              onArchive={() =>
+                section.archived ? unarchiveTask(item.id) : archiveTask(item.id)
+              }
               onDelete={() =>
                 Alert.alert('Delete task?', 'This cannot be undone.', [
                   { text: 'Cancel', style: 'cancel' },
@@ -122,7 +140,7 @@ export default function FinishedTasksScreen() {
             />
           )}
           ListFooterComponent={
-            sections.length > 0 ? (
+            doneTasks.length > 0 ? (
               <Pressable onPress={confirmClear} style={styles.clearBtn}>
                 <Text style={[typography.button, { color: tokens.danger }]}>
                   Clear finished tasks

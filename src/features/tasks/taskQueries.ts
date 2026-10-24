@@ -4,6 +4,7 @@ import type { Task } from '@/types/task';
 import {
   isAfterTomorrow,
   isCreatedToday,
+  isOverdue,
   isToday,
   isTomorrow,
 } from '@/utils/dates';
@@ -17,10 +18,17 @@ function sortTodayTasks(tasks: Task[]): Task[] {
   });
 }
 
+/**
+ * Today shows what needs attention now: due today, overdue, must-do, or
+ * captured today without a date. An overdue task stays here until it is
+ * done or rescheduled rather than quietly dropping off the list.
+ */
 function matchesTodayActive(task: Task): boolean {
   if (task.status !== 'active') return false;
   if (task.priority === 'must_do_today') return true;
-  if (task.dueDate && isToday(task.dueDate)) return true;
+  if (task.dueDate && (isToday(task.dueDate) || isOverdue(task.dueDate))) {
+    return true;
+  }
   if (!task.dueDate && isCreatedToday(task.createdAt)) return true;
   return false;
 }
@@ -28,7 +36,7 @@ function matchesTodayActive(task: Task): boolean {
 export async function fetchTodayTasks(): Promise<Task[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<Record<string, unknown>>(
-    `SELECT * FROM tasks WHERE deletedAt IS NULL`
+    `SELECT * FROM tasks WHERE status = 'active' AND deletedAt IS NULL`
   );
   const tasks = rows.map(mapRowToTask);
   return sortTodayTasks(tasks.filter(matchesTodayActive));

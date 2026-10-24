@@ -17,9 +17,15 @@ import { useListStore } from '@/store/listStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useProStore } from '@/store/proStore';
 import {
+  getLastBackupAt,
   runExportWithFeedback,
   runImportWithFeedback,
 } from '@/features/backup/backupService';
+import {
+  getSnapshotInfo,
+  restoreSnapshot,
+  type SnapshotInfo,
+} from '@/db/snapshot';
 import {
   getReminderPermissionStatus,
   requestReminderPermission,
@@ -76,7 +82,75 @@ export default function SettingsScreen() {
   const proNotice = useProStore((s) => s.notice);
   const setSetting = useSettingsStore((s) => s.setSetting);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
-  const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null);
+  const [backupBusy, setBackupBusy] = useState<
+    'export' | 'import' | 'restore' | null
+  >(null);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<SnapshotInfo | null>(null);
+
+  const refreshBackupInfo = useCallback(async () => {
+    const [last, snap] = await Promise.all([getLastBackupAt(), getSnapshotInfo()]);
+    setLastBackupAt(last);
+    setSnapshot(snap);
+  }, []);
+
+  useEffect(() => {
+    void refreshBackupInfo();
+  }, [refreshBackupInfo]);
+
+  const rehydrateAll = async () => {
+    await useSettingsStore.getState().hydrate();
+    await useListStore.getState().refresh();
+    await useTaskStore.getState().refreshAll();
+  };
+
+  const confirmRestoreSnapshot = () => {
+    const when = snapshot?.takenAt
+      ? snapshot.takenAt.toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })
+      : 'the last update';
+    Alert.alert(
+      'Go back to the pre-update copy?',
+      `Do! kept a copy of your tasks from just before the app last updated (${when}). Restoring it replaces everything on this device with that copy. Changes made since then will be lost.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore copy',
+          style: 'destructive',
+          onPress: () =>
+            void (async () => {
+              setBackupBusy('restore');
+              try {
+                await restoreSnapshot();
+                await rehydrateAll();
+                Alert.alert('Restored', 'Your tasks are back to the pre-update copy.');
+              } catch (error) {
+                Alert.alert(
+                  'Could not restore',
+                  error instanceof Error ? error.message : 'Please try again.'
+                );
+              } finally {
+                setBackupBusy(null);
+                void refreshBackupInfo();
+              }
+            })(),
+        },
+      ]
+    );
+  };
+
+  const lastBackupLabel = (() => {
+    if (!lastBackupAt) return 'Never exported';
+    const date = new Date(lastBackupAt);
+    if (Number.isNaN(date.getTime())) return 'Never exported';
+    return `Last export ${date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+    })}`;
+  })();
   const defaultTime = parseTimeKey(settings.defaultReminderTime);
   const [pickerHours, setPickerHours] = useState(defaultTime.hours);
   const [pickerMinutes, setPickerMinutes] = useState(defaultTime.minutes);
@@ -271,7 +345,7 @@ export default function SettingsScreen() {
           </Text>
           <SettingsRow
             label="Export Backup"
-            value={backupBusy === 'export' ? 'Exporting…' : undefined}
+            value={backupBusy === 'export' ? 'Exporting…' : lastBackupLabel}
             valueMuted
             disabled={backupBusy !== null}
             onPress={() =>
@@ -282,6 +356,7 @@ export default function SettingsScreen() {
                   await runExportWithFeedback();
                 } finally {
                   setBackupBusy(null);
+                  void refreshBackupInfo();
                 }
               })()
             }
@@ -294,17 +369,27 @@ export default function SettingsScreen() {
             onPress={() =>
               void (async () => {
                 await triggerSelectionHaptic();
-                await runImportWithFeedback(
-                  async () => {
-                    await useSettingsStore.getState().hydrate();
-                    await useListStore.getState().refresh();
-                    await useTaskStore.getState().refreshAll();
-                  },
-                  (busy) => setBackupBusy(busy ? 'import' : null)
+                await runImportWithFeedback(rehydrateAll, (busy) =>
+                  setBackupBusy(busy ? 'import' : null)
                 );
               })()
             }
           />
+          {snapshot ? (
+            // Only shown when a pre-update copy actually exists on this device.
+            <SettingsRow
+              label="Restore Pre-update Copy"
+              value={backupBusy === 'restore' ? 'Restoring…' : undefined}
+              valueMuted
+              disabled={backupBusy !== null}
+              onPress={() =>
+                void (async () => {
+                  await triggerSelectionHaptic();
+                  confirmRestoreSnapshot();
+                })()
+              }
+            />
+          ) : null}
           <SettingsRow
             label="Cloud Sync"
             value="Coming later"

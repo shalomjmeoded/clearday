@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -5,6 +6,7 @@ import { Alert } from 'react-native';
 
 import { INBOX_LIST_ID, SCHEMA_VERSION } from '@/db/constants';
 import { getDb } from '@/db/client';
+import { runExclusive, withTransaction } from '@/db/exclusive';
 import { mapRowToTask } from '@/features/tasks/taskMapper';
 import {
   cancelScheduledNotifications,
@@ -18,7 +20,11 @@ import {
 } from '@/types/backup';
 import type { TaskList } from '@/types/list';
 import type { Task, TaskPriority, TaskStatus } from '@/types/task';
-import { DEFAULT_SETTINGS, type AppSettings } from '@/types/settings';
+import {
+  normalizeSettings,
+  serializeSetting,
+  SETTINGS_KEYS,
+} from '@/types/settings';
 import { nowIso } from '@/utils/dates';
 
 function backupFilename(): string {
@@ -39,18 +45,21 @@ export async function buildBackup(): Promise<ClearDayBackup> {
     'SELECT key, value FROM settings'
   );
 
+  // Only user preferences travel. This leaves out schemaVersion, the
+  // device-local purchase cache (not user data, must not move between
+  // devices), and any stale row from an earlier release.
   const settings: Record<string, unknown> = {};
+  const exportable = new Set<string>(SETTINGS_KEYS);
   for (const row of settingRows) {
-    if (row.key === 'schemaVersion') continue;
-    // Device-local purchase cache: not user data, and it should not travel
-    // between devices in a shared backup file.
     if (row.key === PRO_ENTITLEMENT_CACHE_KEY) continue;
+    if (!exportable.has(row.key)) continue;
     settings[row.key] = row.value;
   }
 
   return {
     version: CLEARDAY_BACKUP_VERSION,
     exportedAt: nowIso(),
+    appVersion: Constants.expoConfig?.version ?? undefined,
     lists: listRows.map((row) => ({
       id: row.id as string,
       name: row.name as string,
@@ -74,11 +83,76 @@ function parseBackupJson(raw: string): ClearDayBackup {
     throw new Error('Backup file is missing tasks or lists.');
   }
   if (parsed.version !== CLEARDAY_BACKUP_VERSION) {
+    const from = typeof parsed.appVersion === 'string' ? `, Do! ${parsed.appVersion}` : '';
     throw new Error(
-      `This backup version (${parsed.version}) is not supported. Expected version ${CLEARDAY_BACKUP_VERSION}.`
+      typeof parsed.version === 'number' && parsed.version > CLEARDAY_BACKUP_VERSION
+        ? `This backup (version ${parsed.version}${from}) is from a newer version of Do!. Update the app, then import again.`
+        : `This backup version (${parsed.version}) is not supported. Expected version ${CLEARDAY_BACKUP_VERSION}.`
     );
   }
   return parsed;
+}
+
+/** Device-local record of the last successful export; never exported itself. */
+export const LAST_BACKUP_AT_KEY = 'lastBackupAt';
+
+export async function getLastBackupAt(): Promise<string | null> {
+  try {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ value: string }>(
+      'SELECT value FROM settings WHERE key = ?',
+      [LAST_BACKUP_AT_KEY]
+    );
+    return row?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function recordBackupExported(): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.runAsync('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
+      LAST_BACKUP_AT_KEY,
+      nowIso(),
+    ]);
+  } catch {
+    // The export itself succeeded; the note is a convenience.
+  }
+}
+
+/** What an import would replace the device's data with. Shown before confirming. */
+export interface BackupSummary {
+  exportedAt: string;
+  taskCount: number;
+  listCount: number;
+}
+
+export function summarizeBackup(backup: ClearDayBackup): BackupSummary {
+  return {
+    exportedAt: backup.exportedAt,
+    taskCount: backup.tasks.filter(
+      (task) => task && typeof task === 'object' && !task.deletedAt
+    ).length,
+    // The Inbox is implied and not worth counting as a "list" to the user.
+    listCount: backup.lists.filter(
+      (list) => list && typeof list === 'object' && !list.deletedAt && list.id !== INBOX_LIST_ID
+    ).length,
+  };
+}
+
+function formatBackupDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'an unknown date';
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 const VALID_STATUSES: readonly TaskStatus[] = ['active', 'completed', 'archived'];
@@ -183,8 +257,12 @@ function ensureInboxList(lists: TaskList[]): TaskList[] {
 
 async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
   const db = await getDb();
+  // Exports never contain soft-deleted rows; a hand-edited file might. They
+  // are dropped here so tasks cannot be bound to a list the UI never shows.
   const lists = ensureInboxList(
-    backup.lists.map((list, index) => normalizeList(list, index))
+    backup.lists
+      .map((list, index) => normalizeList(list, index))
+      .filter((list) => !list.deletedAt)
   );
   const knownListIds = new Set<string>();
   for (const list of lists) {
@@ -193,9 +271,9 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
     }
     knownListIds.add(list.id);
   }
-  const tasks = backup.tasks.map((task, index) =>
-    normalizeTask(task, index, knownListIds)
-  );
+  const tasks = backup.tasks
+    .map((task, index) => normalizeTask(task, index, knownListIds))
+    .filter((task) => !task.deletedAt);
 
   const seenIds = new Set<string>();
   for (const task of tasks) {
@@ -213,98 +291,93 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
     }
   }
 
-  // Capture before the wipe so the pre-import OS notifications can be
-  // cancelled after the restore commits (never before — a failed import
-  // must leave existing reminders untouched).
-  const staleReminders = await db.getAllAsync<{ notificationId: string | null }>(
-    'SELECT notificationId FROM reminders'
-  );
-
-  await db.execAsync('BEGIN IMMEDIATE TRANSACTION');
-  try {
-    await db.runAsync('DELETE FROM reminders');
-    await db.runAsync('DELETE FROM tasks');
-    await db.runAsync('DELETE FROM lists');
-
-    for (const list of lists) {
-      await db.runAsync(
-        `INSERT INTO lists (id, name, color, sortOrder, createdAt, updatedAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          list.id,
-          list.name,
-          list.color ?? null,
-          list.sortOrder,
-          list.createdAt,
-          list.updatedAt,
-          list.deletedAt ?? null,
-        ]
-      );
-    }
-
-    for (const task of tasks) {
-      await db.runAsync(
-        `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, recurringTaskId, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          task.id,
-          task.title,
-          task.notes ?? null,
-          task.status,
-          task.priority,
-          task.color ?? null,
-          task.dueDate ?? null,
-          task.reminderAt ?? null,
-          task.recurrence,
-          task.recurringTaskId ?? null,
-          task.listId ?? INBOX_LIST_ID,
-          task.sortOrder,
-          task.completedAt ?? null,
-          task.createdAt,
-          task.updatedAt,
-          task.deletedAt ?? null,
-        ]
-      );
-    }
-
-    const settings = backup.settings ?? {};
-    for (const key of Object.keys(DEFAULT_SETTINGS)) {
-      const value = settings[key];
-      let stringValue =
-        value === undefined || typeof value === 'object'
-          ? String(DEFAULT_SETTINGS[key as keyof AppSettings])
-          : String(value);
-      if (key === 'defaultListId' && !knownListIds.has(stringValue)) {
-        stringValue = INBOX_LIST_ID;
-      }
-      await db.runAsync(
-        'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-        [key, stringValue]
-      );
-    }
-
-    await db.runAsync(
-      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-      ['schemaVersion', String(SCHEMA_VERSION)]
+  // Held for the whole restore, including the notification rescheduling
+  // after commit: returning from the document picker fires the foreground
+  // reminder sync, which must not observe (or write into) a half-restored
+  // database.
+  await runExclusive(async () => {
+    // Capture before the wipe so the pre-import OS notifications can be
+    // cancelled after the restore commits (never before — a failed import
+    // must leave existing reminders untouched).
+    const staleReminders = await db.getAllAsync<{ notificationId: string | null }>(
+      'SELECT notificationId FROM reminders'
     );
 
-    await db.execAsync('COMMIT');
-  } catch (error) {
-    await db.execAsync('ROLLBACK');
-    throw error;
-  }
+    await withTransaction(async () => {
+      await db.runAsync('DELETE FROM reminders');
+      await db.runAsync('DELETE FROM tasks');
+      await db.runAsync('DELETE FROM lists');
 
-  await cancelScheduledNotifications(
-    staleReminders
-      .map((row) => row.notificationId)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0)
-  );
+      for (const list of lists) {
+        await db.runAsync(
+          `INSERT INTO lists (id, name, color, sortOrder, createdAt, updatedAt, deletedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            list.id,
+            list.name,
+            list.color ?? null,
+            list.sortOrder,
+            list.createdAt,
+            list.updatedAt,
+            list.deletedAt ?? null,
+          ]
+        );
+      }
 
-  for (const task of tasks) {
-    if (task.reminderAt && task.status === 'active') {
-      await scheduleReminderForTask(task);
+      for (const task of tasks) {
+        await db.runAsync(
+          `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, recurringTaskId, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            task.id,
+            task.title,
+            task.notes ?? null,
+            task.status,
+            task.priority,
+            task.color ?? null,
+            task.dueDate ?? null,
+            task.reminderAt ?? null,
+            task.recurrence,
+            task.recurringTaskId ?? null,
+            task.listId ?? INBOX_LIST_ID,
+            task.sortOrder,
+            task.completedAt ?? null,
+            task.createdAt,
+            task.updatedAt,
+            task.deletedAt ?? null,
+          ]
+        );
+      }
+
+      const settings = normalizeSettings(backup.settings, knownListIds);
+      for (const key of SETTINGS_KEYS) {
+        await db.runAsync(
+          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+          [key, serializeSetting(key, settings[key])]
+        );
+      }
+
+      await db.runAsync(
+        'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+        ['schemaVersion', String(SCHEMA_VERSION)]
+      );
+    });
+
+    await cancelScheduledNotifications(
+      staleReminders
+        .map((row) => row.notificationId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    );
+
+    // Silent: this runs under the lock, and an OS permission prompt here
+    // would hold it until the user answers. If permission is not granted
+    // yet, the next sync pass schedules these once it is.
+    for (const task of tasks) {
+      if (task.reminderAt && task.status === 'active') {
+        await scheduleReminderForTask(task, { silent: true });
+      }
     }
-  }
+  });
 }
 
 export async function exportBackupToFile(): Promise<void> {
@@ -327,9 +400,11 @@ export async function exportBackupToFile(): Promise<void> {
     dialogTitle: 'Export Do! backup',
     UTI: 'public.json',
   });
+  await recordBackupExported();
 }
 
-export async function importBackupFromFile(): Promise<boolean> {
+/** Lets the user choose a file and parses it; null when they cancel. */
+export async function pickBackupFile(): Promise<ClearDayBackup | null> {
   const result = await DocumentPicker.getDocumentAsync({
     type: ['application/json', 'text/plain', '*/*'],
     copyToCacheDirectory: true,
@@ -337,33 +412,45 @@ export async function importBackupFromFile(): Promise<boolean> {
   });
 
   if (result.canceled || !result.assets?.[0]?.uri) {
-    return false;
+    return null;
   }
 
   const raw = await FileSystem.readAsStringAsync(result.assets[0].uri, {
     encoding: FileSystem.EncodingType.UTF8,
   });
 
-  const backup = parseBackupJson(raw);
+  return parseBackupJson(raw);
+}
+
+export async function restoreBackup(backup: ClearDayBackup): Promise<BackupSummary> {
+  await restoreBackupData(backup);
+  return summarizeBackup(backup);
+}
+
+export async function importBackupFromFile(): Promise<boolean> {
+  const backup = await pickBackupFile();
+  if (!backup) return false;
   await restoreBackupData(backup);
   return true;
 }
 
-export function confirmImportBackup(onConfirm: () => void | Promise<void>): void {
-  Alert.alert(
-    'Import backup?',
-    'This replaces all tasks, lists, and settings on this device with the backup file. This cannot be undone.',
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Import',
-        style: 'destructive',
-        onPress: () => {
-          void onConfirm();
-        },
-      },
-    ]
-  );
+/**
+ * Asks before replacing the device's data, naming what the file contains so
+ * the user can tell they picked the right one. Resolves false on cancel or
+ * when the dialog is dismissed without a choice.
+ */
+export function confirmImportBackup(summary: BackupSummary): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Replace with this backup?',
+      `Backup from ${formatBackupDate(summary.exportedAt)} with ${plural(summary.taskCount, 'task')} and ${plural(summary.listCount, 'list')}.\n\nThis replaces all tasks, lists, and settings on this device. It cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Import', style: 'destructive', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) }
+    );
+  });
 }
 
 export function showDeviceTransferHelp(
@@ -395,22 +482,24 @@ export async function runImportWithFeedback(
   onRestored: () => void | Promise<void>,
   onBusyChange?: (busy: boolean) => void
 ): Promise<void> {
-  confirmImportBackup(async () => {
-    onBusyChange?.(true);
-    try {
-      const imported = await importBackupFromFile();
-      if (!imported) return;
-      await onRestored();
-      Alert.alert(
-        'Import complete',
-        'Your tasks and settings were restored from the backup.'
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Could not import backup.';
-      Alert.alert('Import failed', message);
-    } finally {
-      onBusyChange?.(false);
-    }
-  });
+  onBusyChange?.(true);
+  try {
+    // File first, confirmation second: the dialog can then say what is in it.
+    const backup = await pickBackupFile();
+    if (!backup) return;
+    const summary = summarizeBackup(backup);
+    if (!(await confirmImportBackup(summary))) return;
+    await restoreBackup(backup);
+    await onRestored();
+    Alert.alert(
+      'Import complete',
+      `Restored ${plural(summary.taskCount, 'task')} and ${plural(summary.listCount, 'list')} from the backup.`
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Could not import backup.';
+    Alert.alert('Import failed', message);
+  } finally {
+    onBusyChange?.(false);
+  }
 }

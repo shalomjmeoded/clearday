@@ -3,23 +3,33 @@ import type * as SQLite from 'expo-sqlite';
 
 import { DB_NAME } from './constants';
 
-let database: SQLite.SQLiteDatabase | null = null;
+// The in-flight open is cached, not just the result, so two callers racing
+// on the first access share one connection instead of each opening their own.
+let opening: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (Platform.OS === 'web') {
     throw new Error('SQLite storage is not available in the web preview.');
   }
 
-  if (!database) {
-    const SQLite = await import('expo-sqlite');
-    database = await SQLite.openDatabaseAsync(DB_NAME);
+  if (!opening) {
+    opening = (async () => {
+      const SQLite = await import('expo-sqlite');
+      return SQLite.openDatabaseAsync(DB_NAME);
+    })();
+    // A failed open (disk full, locked file) must not poison every later call.
+    opening.catch(() => {
+      opening = null;
+    });
   }
-  return database;
+  return opening;
 }
 
 export async function closeDb(): Promise<void> {
-  if (database) {
-    await database.closeAsync();
-    database = null;
+  const pending = opening;
+  opening = null;
+  if (pending) {
+    const database = await pending.catch(() => null);
+    await database?.closeAsync();
   }
 }

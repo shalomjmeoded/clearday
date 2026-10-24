@@ -24,8 +24,14 @@ export function formatRecurrenceLabel(recurrence: TaskRecurrence): string {
   return RECURRENCE_OPTIONS.find((o) => o.key === recurrence)?.label ?? 'Never';
 }
 
+const KNOWN_RECURRENCES = new Set<string>(RECURRENCE_OPTIONS.map((o) => o.key));
+
+export function isKnownRecurrence(value: unknown): value is TaskRecurrence {
+  return typeof value === 'string' && KNOWN_RECURRENCES.has(value);
+}
+
 export function isRecurring(recurrence: TaskRecurrence): boolean {
-  return recurrence !== 'none';
+  return isKnownRecurrence(recurrence) && recurrence !== 'none';
 }
 
 /**
@@ -64,9 +70,11 @@ export function getNextDueDate(
   recurrence: TaskRecurrence,
   now: Date = new Date()
 ): string {
-  if (recurrence === 'none') return anchorIso;
+  // An unknown value would step by zero and never get past today.
+  if (!isRecurring(recurrence)) return anchorIso;
 
   const anchor = startOfDay(parseISO(anchorIso));
+  if (Number.isNaN(anchor.getTime())) return startOfDay(now).toISOString();
   const today = startOfDay(now);
 
   let steps = 1;

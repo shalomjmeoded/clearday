@@ -38,7 +38,20 @@ exports.setNotificationChannelAsync = async function setNotificationChannelAsync
 exports.AndroidImportance = { HIGH: 4 };
 exports.SchedulableTriggerInputTypes = { DATE: 'date' };
 
+// Test hook: the next getPermissionsAsync call waits on this promise, which
+// models the real native round-trip and lets a test park a reminder sync at
+// that point while other database work proceeds.
+let permissionGate = null;
+exports.__setPermissionGate = function __setPermissionGate(promise) {
+  permissionGate = promise;
+};
+
 exports.getPermissionsAsync = async function getPermissionsAsync() {
+  if (permissionGate) {
+    const gate = permissionGate;
+    permissionGate = null;
+    await gate;
+  }
   return { status: 'granted' };
 };
 

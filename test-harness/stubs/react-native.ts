@@ -21,11 +21,18 @@ export function __clearAlerts(): void {
 }
 
 export const Alert = {
-  alert(title: string, message?: string, buttons?: AlertButton[]): void {
+  alert(
+    title: string,
+    message?: string,
+    buttons?: AlertButton[],
+    options?: { cancelable?: boolean; onDismiss?: () => void }
+  ): void {
     alertLog.push({ title, message });
     if (buttons) {
       const chosen = buttonPicker(buttons);
-      chosen?.onPress?.();
+      if (chosen) chosen.onPress?.();
+      // No button picked models the user dismissing the dialog.
+      else options?.onDismiss?.();
     }
   },
 };

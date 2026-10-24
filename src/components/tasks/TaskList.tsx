@@ -157,11 +157,6 @@ export function TaskList({
     if (!reorderMode && wasReorderMode && manualSortTasks.length > 0) {
       setOrderedTasks(manualSortTasks);
     }
-    if (!reorderMode && wasReorderMode) {
-      if (manualSortTasks.length > 0 && onReorderRef.current) {
-        onReorderRef.current(manualSortTasks.map((task) => task.id));
-      }
-    }
     prevReorderModeRef.current = reorderMode;
   }, [manualSortTasks, orderedTasks, reorderMode]);
 
@@ -341,6 +336,9 @@ export function TaskList({
         return data;
       });
       setDraggableListRevision((revision) => revision + 1);
+      // Persist each drop as it happens. Screens whose reorder mode is always
+      // on (Today) would otherwise never write the new order.
+      onReorderRef.current?.(nextIds);
     },
     []
   );

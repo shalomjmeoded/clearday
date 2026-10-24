@@ -2,6 +2,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 
 import { getDb } from '@/db/client';
+import { runExclusive } from '@/db/exclusive';
 import { mapRowToTask } from '@/features/tasks/taskMapper';
 import type { Task } from '@/types/task';
 import { createId } from '@/utils/id';
@@ -278,6 +279,21 @@ export async function syncScheduledReminders(): Promise<{
   const result = { scheduled: 0, cleared: 0, skipped: 0 };
   if (!areLocalNotificationsSupported()) return result;
 
+  // Held for the whole pass. A backup restore may be in flight (the document
+  // picker backgrounds the app, so coming back fires this sync): reading the
+  // tables mid-wipe would make every reminder look like an orphan, and
+  // scheduling into the open transaction would leave OS notifications that
+  // no row remembers. Taking the lock also serialises the launch and
+  // foreground syncs with each other.
+  await runExclusive(() => syncScheduledRemindersUnlocked(result));
+  return result;
+}
+
+async function syncScheduledRemindersUnlocked(result: {
+  scheduled: number;
+  cleared: number;
+  skipped: number;
+}): Promise<void> {
   const db = await getDb();
   try {
     const nowMs = Date.now();
@@ -332,7 +348,6 @@ export async function syncScheduledReminders(): Promise<{
   } catch {
     // best effort
   }
-  return result;
 }
 
 export interface ReminderResponse {

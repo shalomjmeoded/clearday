@@ -12,10 +12,14 @@ import { join } from 'node:path';
 import {
   buildBackup,
   exportBackupToFile,
+  getLastBackupAt,
+  LAST_BACKUP_AT_KEY,
+  summarizeBackup,
   importBackupFromFile,
   runImportWithFeedback,
 } from '@/features/backup/backupService';
 import { initDatabase } from '@/db/migrations';
+import { syncScheduledReminders } from '@/features/reminders/reminderService';
 import { getDb, closeDb } from '@/db/client';
 import { INBOX_LIST_ID, SCHEMA_VERSION } from '@/db/constants';
 import { CLEARDAY_BACKUP_VERSION } from '@/types/backup';
@@ -27,10 +31,12 @@ const {
   scheduled,
   cancelled,
   __resetNotifications,
+  __setPermissionGate,
 } = require('./stubs/expo-notifications.cjs') as {
   scheduled: Map<string, { body: string; date: Date }>;
   cancelled: string[];
   __resetNotifications: () => void;
+  __setPermissionGate: (gate: Promise<void>) => void;
 };
 import { sharedUris } from './stubs/expo-sharing';
 import {
@@ -207,6 +213,49 @@ async function main() {
     assert.ok(sharedUris[0].endsWith('.clearday'));
   });
 
+  await test('export stamps the app version and records the last export date', async () => {
+    await freshDb();
+    assert.equal(await getLastBackupAt(), null);
+    sharedUris.length = 0;
+    await exportBackupToFile();
+    const raw = await (await import('node:fs/promises')).readFile(sharedUris[0], 'utf8');
+    const parsed = JSON.parse(raw);
+    assert.equal(parsed.appVersion, '9.9.9-test');
+    const last = await getLastBackupAt();
+    assert.ok(last && !Number.isNaN(new Date(last).getTime()), 'lastBackupAt recorded');
+    assert.ok(!(LAST_BACKUP_AT_KEY in parsed.settings), 'device-local note is not exported');
+    // Importing a backup must not erase the device's own export history.
+    assert.equal(await importObject(validBackup()), true);
+    assert.equal(await getLastBackupAt(), last);
+  });
+
+  await test('a backup from a newer app version gets a clear "update the app" message', async () => {
+    await freshDb();
+    await assert.rejects(
+      importObject(validBackup({ version: CLEARDAY_BACKUP_VERSION + 1, appVersion: '12.0' })),
+      /newer version of Do!.*12\.0|12\.0.*newer version/s
+    );
+  });
+
+  await test('summarizeBackup counts live tasks and custom lists only', async () => {
+    const summary = summarizeBackup(
+      validBackup({
+        lists: [
+          { id: INBOX_LIST_ID, name: 'Inbox', sortOrder: 0, createdAt: NOW, updatedAt: NOW },
+          { id: 'a', name: 'A', sortOrder: 1, createdAt: NOW, updatedAt: NOW },
+          { id: 'b', name: 'B', sortOrder: 2, createdAt: NOW, updatedAt: NOW, deletedAt: NOW },
+        ],
+        tasks: [
+          { id: 't1', title: 'x' },
+          { id: 't2', title: 'y', deletedAt: NOW },
+          null,
+        ],
+      }) as never
+    );
+    assert.equal(summary.taskCount, 1);
+    assert.equal(summary.listCount, 1);
+  });
+
   await test('soft-deleted tasks and lists are excluded from export', async () => {
     await freshDb();
     await seedTask('live');
@@ -242,7 +291,7 @@ async function main() {
     );
     await assert.rejects(
       importObject(validBackup({ version: 99 })),
-      /version \(99\) is not supported/
+      /version 99\b.*newer version of Do!/
     );
   });
 
@@ -365,6 +414,90 @@ async function main() {
     assert.equal(map.schemaVersion, String(SCHEMA_VERSION));
   });
 
+  await test('settings: invalid enum / time values in a backup fall back to defaults', async () => {
+    await freshDb();
+    const backup = validBackup({
+      settings: {
+        theme: 'purple',
+        colorTheme: 'neon',
+        completedTaskBehavior: 'explode',
+        swipeLeftAction: 'fly',
+        swipeRightAction: 'important',
+        defaultReminderTime: '25:99',
+        hapticsEnabled: 'maybe',
+      },
+    });
+    assert.equal(await importObject(backup), true);
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ key: string; value: string }>(
+      'SELECT key, value FROM settings'
+    );
+    const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    assert.equal(map.theme, 'system');
+    assert.equal(map.colorTheme, 'classic');
+    assert.equal(map.completedTaskBehavior, 'collapse');
+    assert.equal(map.swipeLeftAction, 'tomorrow');
+    assert.equal(map.swipeRightAction, 'important', 'valid value kept');
+    assert.equal(map.defaultReminderTime, '09:00');
+    assert.equal(map.hapticsEnabled, 'true');
+  });
+
+  await test('hand-edited backup: soft-deleted lists and tasks are dropped, their tasks go to Inbox', async () => {
+    await freshDb();
+    const backup = validBackup({
+      lists: [
+        { id: INBOX_LIST_ID, name: 'Inbox', sortOrder: 0, createdAt: NOW, updatedAt: NOW },
+        { id: 'gone', name: 'Gone', sortOrder: 1, createdAt: NOW, updatedAt: NOW, deletedAt: NOW },
+        { id: 'kept', name: 'Kept', sortOrder: 2, createdAt: NOW, updatedAt: NOW },
+      ],
+      tasks: [
+        { id: 'a', title: 'A', status: 'active', listId: 'gone', createdAt: NOW, updatedAt: NOW },
+        { id: 'b', title: 'B', status: 'active', listId: 'kept', createdAt: NOW, updatedAt: NOW },
+        { id: 'c', title: 'C', status: 'active', listId: 'kept', createdAt: NOW, updatedAt: NOW, deletedAt: NOW },
+      ],
+      settings: { defaultListId: 'gone' },
+    });
+    assert.equal(await importObject(backup), true);
+    const db = await getDb();
+    const lists = await db.getAllAsync<{ id: string }>('SELECT id FROM lists ORDER BY sortOrder');
+    assert.deepEqual(lists.map((l) => l.id), [INBOX_LIST_ID, 'kept']);
+    const tasks = await db.getAllAsync<{ id: string; listId: string }>(
+      'SELECT id, listId FROM tasks ORDER BY id'
+    );
+    assert.deepEqual(
+      tasks.map((t) => [t.id, t.listId]),
+      [
+        ['a', INBOX_LIST_ID],
+        ['b', 'kept'],
+      ]
+    );
+    const def = await db.getFirstAsync<{ value: string }>(
+      "SELECT value FROM settings WHERE key = 'defaultListId'"
+    );
+    assert.equal(def!.value, INBOX_LIST_ID, 'defaultListId cannot point at a dropped list');
+  });
+
+  await test('export carries only known user preferences', async () => {
+    await freshDb();
+    const db = await getDb();
+    await db.runAsync("INSERT INTO settings (key, value) VALUES ('isPro', 'true')");
+    await db.runAsync("INSERT INTO settings (key, value) VALUES ('someFutureKey', 'x')");
+    const backup = await buildBackup();
+    assert.deepEqual(
+      Object.keys(backup.settings).sort(),
+      [
+        'colorTheme',
+        'completedTaskBehavior',
+        'defaultListId',
+        'defaultReminderTime',
+        'hapticsEnabled',
+        'swipeLeftAction',
+        'swipeRightAction',
+        'theme',
+      ]
+    );
+  });
+
   await test('import without settings key at all uses full defaults', async () => {
     await freshDb();
     const backup = validBackup();
@@ -433,6 +566,107 @@ async function main() {
     assert.equal(rows.length, 1, 'reminders table must be untouched');
   });
 
+  /**
+   * Models the real race: the app comes back from the document picker, the
+   * foreground reminder sync starts and reads the tables, then stalls on the
+   * native permission call while the import begins its transaction. Returns
+   * the sync's promise. The gate opens when the import reaches its first wipe
+   * statement (the harmful spot), or after a short fallback for the case
+   * where the import is correctly blocked behind the sync.
+   */
+  async function startSyncParkedOnPermission(options: { failOnTaskId?: string } = {}) {
+    const db = await getDb();
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const original = db.runAsync.bind(db);
+    db.runAsync = (async (sql: string, ...params: unknown[]) => {
+      if (sql === 'DELETE FROM reminders') open();
+      // Fault injection: a write error part-way through the restore.
+      if (
+        options.failOnTaskId &&
+        sql.startsWith('INSERT INTO tasks') &&
+        (params[0] as unknown[])?.[0] === options.failOnTaskId
+      ) {
+        // Fail slowly, the way a real I/O error surfaces, so that other work
+        // parked on the connection has time to land inside the transaction.
+        await new Promise((r) => setTimeout(r, 20));
+        throw new Error('simulated disk error');
+      }
+      return (original as (...a: unknown[]) => Promise<unknown>)(sql, ...params);
+    }) as typeof db.runAsync;
+    setTimeout(open, 100);
+    __setPermissionGate(gate);
+    const sync = syncScheduledReminders();
+    // Let the sync get as far as the permission call before the import starts.
+    await new Promise((r) => setImmediate(r));
+    // Wrapped so that awaiting this helper does not adopt (and wait on) `sync`.
+    return { sync };
+  }
+
+  async function reminderInvariant() {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ taskId: string; notificationId: string }>(
+      'SELECT taskId, notificationId FROM reminders ORDER BY taskId'
+    );
+    const tasks = new Set(
+      (await db.getAllAsync<{ id: string }>('SELECT id FROM tasks')).map((t) => t.id)
+    );
+    for (const row of rows) {
+      assert.ok(tasks.has(row.taskId), `reminder row for missing task ${row.taskId}`);
+    }
+    const known = new Set(rows.map((r) => r.notificationId));
+    for (const id of scheduled.keys()) {
+      assert.ok(known.has(id), `OS notification ${id} has no reminder row (orphan)`);
+    }
+    return rows;
+  }
+
+  await test('race: sync parked on permission while a FAILED import runs leaves reminders consistent', async () => {
+    await freshDb();
+    const db = await getDb();
+    await seedTask('x', { reminderAt: FUTURE }); // needs scheduling
+    await seedTask('y', { reminderAt: FUTURE }); // already scheduled
+    await db.runAsync(
+      'INSERT INTO reminders (id, taskId, notificationId, scheduledAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      ['r-y', 'y', 'precious-notif', FUTURE, NOW, NOW]
+    );
+    cancelled.length = 0;
+    const { sync } = await startSyncParkedOnPermission({ failOnTaskId: 'poison' });
+    await assert.rejects(
+      importObject(
+        validBackup({
+          tasks: [{ id: 'poison', title: 'P', status: 'active', createdAt: NOW, updatedAt: NOW }],
+        })
+      ),
+      /simulated disk error/
+    );
+    await sync;
+    assert.deepEqual(cancelled, [], 'nothing cancelled');
+    const rows = await reminderInvariant();
+    assert.deepEqual(
+      rows.map((r) => r.taskId),
+      ['x', 'y'],
+      'x scheduled by the sync, y untouched'
+    );
+  });
+
+  await test('race: sync parked on permission while a SUCCESSFUL import runs yields one reminder per restored task', async () => {
+    await freshDb();
+    await seedTask('old', { reminderAt: FUTURE }); // sync wants to schedule this
+    const { sync } = await startSyncParkedOnPermission();
+    const backup = validBackup({
+      tasks: [
+        { id: 'a', title: 'A', status: 'active', reminderAt: FUTURE, createdAt: NOW, updatedAt: NOW },
+        { id: 'b', title: 'B', status: 'active', reminderAt: FUTURE, createdAt: NOW, updatedAt: NOW },
+      ],
+    });
+    assert.equal(await importObject(backup), true);
+    await sync;
+    const rows = await reminderInvariant();
+    assert.deepEqual(rows.map((r) => r.taskId), ['a', 'b'], 'no row for the wiped task');
+    assert.equal(scheduled.size, 2, 'exactly one OS notification per restored task');
+  });
+
   await test('picker cancel returns false and changes nothing', async () => {
     await freshDb();
     await seedTask('keep');
@@ -474,6 +708,60 @@ async function main() {
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(restored, true);
     assert.ok(alertLog.some((a) => a.title === 'Import complete'));
+  });
+
+  await test('runImportWithFeedback: confirmation names the file contents; success names what was restored', async () => {
+    await freshDb();
+    const path = join(cacheDirectory, 'preview-test.clearday');
+    await writeFile(
+      path,
+      JSON.stringify(
+        validBackup({
+          exportedAt: '2026-03-05T10:00:00.000Z',
+          lists: [
+            { id: INBOX_LIST_ID, name: 'Inbox', sortOrder: 0, createdAt: NOW, updatedAt: NOW },
+            { id: 'w', name: 'Work', sortOrder: 1, createdAt: NOW, updatedAt: NOW },
+          ],
+          tasks: [
+            { id: 'a', title: 'A', createdAt: NOW, updatedAt: NOW },
+            { id: 'b', title: 'B', createdAt: NOW, updatedAt: NOW },
+          ],
+        })
+      ),
+      'utf8'
+    );
+    __setPickerResult({ canceled: false, assets: [{ uri: path }] });
+    __setAlertButtonPicker((buttons) => buttons.find((b) => b.text === 'Import'));
+    __clearAlerts();
+    await runImportWithFeedback(() => {});
+    const confirm = alertLog.find((a) => a.title === 'Replace with this backup?');
+    assert.ok(confirm, 'confirmation shown');
+    assert.match(confirm!.message!, /2 tasks and 1 list\b/);
+    assert.match(confirm!.message!, /2026/);
+    const done = alertLog.find((a) => a.title === 'Import complete');
+    assert.match(done!.message!, /Restored 2 tasks and 1 list from the backup\./);
+  });
+
+  await test('runImportWithFeedback: dismissing the dialog without a choice imports nothing', async () => {
+    await freshDb();
+    await seedTask('keep');
+    const before = await snapshot();
+    const path = join(cacheDirectory, 'dismiss-test.clearday');
+    await writeFile(path, JSON.stringify(validBackup()), 'utf8');
+    __setPickerResult({ canceled: false, assets: [{ uri: path }] });
+    __setAlertButtonPicker(() => undefined);
+    const busy: boolean[] = [];
+    await runImportWithFeedback(() => {}, (b) => busy.push(b));
+    assert.deepEqual(await snapshot(), before);
+    assert.deepEqual(busy, [true, false]);
+  });
+
+  await test('runImportWithFeedback: picker cancel never shows the confirmation', async () => {
+    await freshDb();
+    __setPickerResult({ canceled: true });
+    __clearAlerts();
+    await runImportWithFeedback(() => {});
+    assert.equal(alertLog.length, 0);
   });
 
   await test('runImportWithFeedback: bad file → "Import failed" alert, data intact', async () => {

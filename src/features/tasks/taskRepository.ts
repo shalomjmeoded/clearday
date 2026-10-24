@@ -1,5 +1,6 @@
 import { INBOX_LIST_ID } from '@/db/constants';
 import { getDb } from '@/db/client';
+import { runInTransaction } from '@/db/exclusive';
 import { mapRowToTask } from '@/features/tasks/taskMapper';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
 import type { CreateTaskInput, Task, UpdateTaskInput } from '@/types/task';
@@ -248,13 +249,17 @@ export const taskRepository = {
       // Only fold back into a task that is still in play. An archived series
       // should not be resurrected by reopening one old record.
       if (live && live.status === 'active') {
-        await this.deletePermanent(id);
-        return this.update(live.id, {
-          status: 'active',
-          completedAt: undefined,
-          dueDate: existing.dueDate,
-          reminderAt: existing.reminderAt,
-          priority: existing.priority,
+        // Atomic: a kill between the two writes must not lose the record
+        // without pulling the live task back.
+        return runInTransaction(async () => {
+          await this.deletePermanent(id);
+          return this.update(live.id, {
+            status: 'active',
+            completedAt: undefined,
+            dueDate: existing.dueDate,
+            reminderAt: existing.reminderAt,
+            priority: existing.priority,
+          });
         });
       }
       // The series is gone or archived, so the record becomes a plain task.
@@ -269,6 +274,22 @@ export const taskRepository = {
 
   async archive(id: string): Promise<Task | null> {
     return this.update(id, { status: 'archived', reminderAt: undefined });
+  },
+
+  /** Brings an archived task back to the active list. */
+  async unarchive(id: string): Promise<Task | null> {
+    const existing = await this.getById(id);
+    if (!existing || existing.status !== 'archived') return existing;
+    return this.update(id, { status: 'active', completedAt: undefined });
+  },
+
+  async getArchived(): Promise<Task[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<Record<string, unknown>>(
+      `SELECT * FROM tasks WHERE status = 'archived' AND deletedAt IS NULL
+       ORDER BY updatedAt DESC`
+    );
+    return rows.map(mapRowToTask);
   },
 
   async deletePermanent(id: string): Promise<void> {
@@ -297,14 +318,15 @@ export const taskRepository = {
     if (orderedIds.length === 0) return;
     const db = await getDb();
     const now = nowIso();
-    await Promise.all(
-      orderedIds.map((id, index) =>
-        db.runAsync(
+    // One transaction: a kill mid-way must not leave half the list reordered.
+    await runInTransaction(async () => {
+      for (const [index, id] of orderedIds.entries()) {
+        await db.runAsync(
           'UPDATE tasks SET sortOrder = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
           [index, now, id]
-        )
-      )
-    );
+        );
+      }
+    });
   },
 
   async scheduleForDate(id: string, dueDate: string): Promise<Task | null> {
@@ -344,7 +366,12 @@ export const taskRepository = {
     const rows = await db.getAllAsync<{ id: string }>(
       `SELECT id FROM tasks WHERE status = 'completed' AND deletedAt IS NULL`
     );
-    await Promise.all(rows.map((row) => this.deletePermanent(row.id)));
+    // All or nothing, so a kill mid-way cannot leave half the history gone.
+    await runInTransaction(async () => {
+      for (const row of rows) {
+        await this.deletePermanent(row.id);
+      }
+    });
   },
 
   async getByListId(listId: string): Promise<Task[]> {

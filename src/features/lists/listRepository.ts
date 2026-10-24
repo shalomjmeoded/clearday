@@ -1,5 +1,6 @@
 import { INBOX_LIST_ID } from '@/db/constants';
 import { getDb } from '@/db/client';
+import { runInTransaction } from '@/db/exclusive';
 import type { TaskList } from '@/types/list';
 import { createId } from '@/utils/id';
 import { nowIso } from '@/utils/dates';
@@ -111,13 +112,17 @@ export const listRepository = {
     }
     const db = await getDb();
     const now = nowIso();
-    await db.runAsync(
-      'UPDATE tasks SET listId = ?, updatedAt = ? WHERE listId = ? AND deletedAt IS NULL',
-      [INBOX_LIST_ID, now, id]
-    );
-    await db.runAsync(
-      'UPDATE lists SET deletedAt = ?, updatedAt = ? WHERE id = ?',
-      [now, now, id]
-    );
+    // Tasks move to the Inbox and the list goes in one step, so none can be
+    // left pointing at a list that no longer shows.
+    await runInTransaction(async () => {
+      await db.runAsync(
+        'UPDATE tasks SET listId = ?, updatedAt = ? WHERE listId = ? AND deletedAt IS NULL',
+        [INBOX_LIST_ID, now, id]
+      );
+      await db.runAsync(
+        'UPDATE lists SET deletedAt = ?, updatedAt = ? WHERE id = ?',
+        [now, now, id]
+      );
+    });
   },
 };
