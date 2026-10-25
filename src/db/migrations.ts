@@ -149,6 +149,16 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // The completed history is read newest-first and paged; without this the
+    // Done view sorts the whole completed set on every load.
+    version: 10,
+    async run(db) {
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_tasks_status_completedAt ON tasks(status, completedAt)'
+      );
+    },
+  },
 ];
 
 async function runMigration(db: Db, migration: Migration): Promise<void> {
@@ -275,6 +285,13 @@ export async function initDatabase(): Promise<void> {
   const db = await getDb();
   await db.execAsync(MIGRATION_SQL);
   await runPendingMigrations(db);
+  // Indexes on migration-added columns cannot live in MIGRATION_SQL (it runs
+  // before the column exists on a legacy database), and migration v5 never
+  // runs on a fresh install (stamped at the current version). Creating them
+  // here covers both paths; IF NOT EXISTS makes it free when already present.
+  await db.execAsync(
+    'CREATE INDEX IF NOT EXISTS idx_tasks_recurringTaskId ON tasks(recurringTaskId)'
+  );
   await seedDefaults(db);
 }
 

@@ -50,7 +50,7 @@ import {
 } from '@/features/pro/subscriptionService';
 import { getIsPro, useProStore } from '@/store/proStore';
 import { useTaskStore } from '@/store/taskStore';
-import { useToastStore } from '@/store/toastStore';
+import { __resetToastQueue, useToastStore } from '@/store/toastStore';
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import { getNextDueDate, shiftReminderToDueDate } from '@/utils/recurrence';
 import { isOverdue, msUntilNextLocalMidnight, toDueDateIso } from '@/utils/dates';
@@ -133,8 +133,18 @@ async function withTimeZone<T>(tz: string, fn: () => T | Promise<T>): Promise<T>
 async function freshDb() {
   await closeDb();
   __resetNotifications();
+  __resetToastQueue();
+  useToastStore.setState({ toast: null });
   await initDatabase();
   return getDb();
+}
+
+/** Mimics <Toast />: an action press dismisses first (skipping onExpire), then runs. */
+async function pressToastAction(): Promise<void> {
+  const toast = useToastStore.getState().toast;
+  if (!toast?.action) throw new Error('no toast action to press');
+  useToastStore.getState().dismiss(toast.id, { ranAction: true });
+  await toast.action.onPress();
 }
 
 async function main() {
@@ -1024,7 +1034,7 @@ async function main() {
       reminderAt: FUTURE_DAY(1).toISOString(),
     });
     await useTaskStore.getState().archiveTask(task.id);
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     const back = await taskRepository.getById(task.id);
     assert.equal(back!.status, 'active');
     assert.equal(back!.reminderAt, task.reminderAt, 'reminder restored');
@@ -1617,7 +1627,7 @@ async function main() {
     const until = await snoozeReminder(plain.id);
     await useTaskStore.getState().archiveTask(plain.id);
     assert.equal(scheduled.size, 0, 'archive silences the alert');
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     await new Promise((r) => setTimeout(r, 50));
     const back = await taskRepository.getById(plain.id);
     assert.equal(back!.status, 'active');
@@ -1633,7 +1643,7 @@ async function main() {
     const repeatUntil = await snoozeReminder(repeat.id);
     await useTaskStore.getState().completeTask(repeat.id);
     await new Promise((r) => setTimeout(r, 300));
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     await new Promise((r) => setTimeout(r, 50));
     const restored = await taskRepository.getById(repeat.id);
     assert.equal(restored!.dueDate, repeat.dueDate);
@@ -1725,7 +1735,7 @@ async function main() {
     assert.match(toast!.message, /^Done · next /);
     assert.equal(toast!.action?.label, 'Undo');
 
-    await toast!.action!.onPress();
+    await pressToastAction();
     const restored = await taskRepository.getById(task.id);
     assert.equal(restored!.dueDate, task.dueDate, 'due date restored');
     assert.equal(restored!.reminderAt, task.reminderAt, 'reminder restored');
@@ -1750,7 +1760,7 @@ async function main() {
     assert.equal(done[0].title, 'Stretch');
     assert.notEqual(done[0].id, task.id, 'the live task keeps its own id');
 
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     done = useTaskStore.getState().doneTasks;
     assert.equal(done.length, 0, 'undo clears the logged occurrence');
     const live = await taskRepository.getById(task.id);
@@ -1977,7 +1987,7 @@ async function main() {
     });
     await useTaskStore.getState().completeTask(task.id);
     await taskRepository.deletePermanent(task.id);
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     assert.equal((await taskRepository.getCompleted()).length, 0, 'record cleaned up');
   });
 
@@ -2827,7 +2837,7 @@ async function main() {
       'refresh keeps it hidden'
     );
 
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     const back = await taskRepository.getById(task.id);
     assert.equal(back?.title, 'oops, not that one', 'Undo restores the row');
     assert.equal(scheduled.size, 1, 'reminder rescheduled on Undo');
@@ -2840,7 +2850,7 @@ async function main() {
     await useTaskStore.getState().deleteTaskWithUndo(task.id);
     const toast = useToastStore.getState().toast!;
     useToastStore.getState().dismiss(toast.id);
-    await toast.onExpire?.();
+    await new Promise((r) => setTimeout(r, 20));
     const db = await getDb();
     const row = await db.getFirstAsync<{ id: string }>(
       'SELECT id FROM tasks WHERE id = ?',
@@ -2849,17 +2859,35 @@ async function main() {
     assert.equal(row, null, 'row removed from the table');
   });
 
-  await test('toast: a newer toast closes the previous Undo window', async () => {
+  await test('toast: a same-key toast replaces in place and runs the old onExpire', async () => {
     useToastStore.setState({ toast: null });
+    __resetToastQueue();
     let expired = 0;
-    useToastStore.getState().show('first', { onExpire: () => { expired++; } });
-    useToastStore.getState().show('second');
-    assert.equal(expired, 1, 'replacement runs onExpire of the replaced toast');
+    useToastStore.getState().show('first', { key: 'batch', onExpire: () => { expired++; } });
+    useToastStore.getState().show('second', { key: 'batch' });
+    assert.equal(expired, 1, 'same-key replacement runs onExpire of the replaced toast');
     assert.equal(useToastStore.getState().toast?.message, 'second');
+    useToastStore.getState().dismiss();
+  });
+
+  await test('toast: a different toast queues instead of closing the Undo window', async () => {
+    useToastStore.setState({ toast: null });
+    __resetToastQueue();
+    let expired = 0;
+    useToastStore.getState().show('delete undo', { key: 'delete-undo', onExpire: () => { expired++; } });
+    useToastStore.getState().show('Archived', { key: 'archive' });
+    assert.equal(expired, 0, 'the pending Undo window stays open');
+    assert.equal(useToastStore.getState().toast?.message, 'delete undo');
+    useToastStore.getState().dismiss();
+    assert.equal(expired, 1, 'timeout dismissal still expires it');
+    assert.equal(useToastStore.getState().toast?.message, 'Archived', 'queued toast shows next');
+    useToastStore.getState().dismiss();
+    assert.equal(useToastStore.getState().toast, null);
   });
 
   await test('toast: taking the action skips onExpire', async () => {
     useToastStore.setState({ toast: null });
+    __resetToastQueue();
     let expired = 0;
     useToastStore.getState().show('undoable', {
       action: { label: 'Undo', onPress: () => {} },
@@ -2971,7 +2999,7 @@ async function main() {
     const until = await snoozeReminder(task.id);
     await useTaskStore.getState().deleteTaskWithUndo(task.id);
     assert.equal(scheduled.size, 0);
-    await useToastStore.getState().toast!.action!.onPress();
+    await pressToastAction();
     assert.equal(scheduled.size, 1);
     assert.equal([...scheduled.values()][0].date.toISOString(), until);
   });

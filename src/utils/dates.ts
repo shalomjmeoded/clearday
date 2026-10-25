@@ -45,6 +45,23 @@ export function msUntilNextLocalMidnight(now: Date = new Date()): number {
   return Math.max(0, next.getTime() - now.getTime()) + 1000;
 }
 
+/**
+ * Local calendar day as a half-open UTC instant range [start, end), for
+ * filtering in SQL. All timestamps are written via toISOString (fixed-width
+ * UTC Zulu), so lexicographic comparison in SQLite matches chronological
+ * order and `col >= start AND col < end` is exactly isSameDay() in JS.
+ */
+export function localDayRangeIso(
+  dayOffset = 0,
+  now: Date = new Date()
+): { start: string; end: string } {
+  const start = startOfDay(addDays(now, dayOffset));
+  return {
+    start: start.toISOString(),
+    end: addDays(start, 1).toISOString(),
+  };
+}
+
 export function isToday(iso?: string): boolean {
   if (!iso) return false;
   return isSameDay(parseISO(iso), new Date());

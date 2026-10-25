@@ -421,10 +421,12 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    minHeight: 45,
-    paddingVertical: 7,
+    // The row is itself the tap target (tap opens, double-tap completes), so
+    // it meets the 44pt minimum with margin to spare.
+    minHeight: 48,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
-    gap: 6,
+    gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   mustRow: {
@@ -465,8 +467,9 @@ const styles = StyleSheet.create({
   verticalRule: {
     position: 'absolute',
     right: 0,
-    top: -7,
-    bottom: -7,
+    // Cancels the row's vertical padding so the rule spans edge to edge.
+    top: -spacing.sm,
+    bottom: -spacing.sm,
     width: StyleSheet.hairlineWidth,
   },
   doneMarker: {
@@ -483,7 +486,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  content: { flex: 1, justifyContent: 'center', minHeight: 28, paddingLeft: 8 },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 28,
+    paddingLeft: spacing.sm,
+  },
   colorMark: {
     position: 'absolute',
     left: 0,

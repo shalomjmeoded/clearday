@@ -4,6 +4,7 @@ import { create } from 'zustand';
 
 import { taskRepository } from '@/features/tasks/taskRepository';
 import {
+  DONE_PAGE_SIZE,
   fetchDoneTasks,
   fetchLaterTasks,
   fetchTodayCompletedTasks,
@@ -30,6 +31,46 @@ const RECURRING_ADVANCE_DELAY_MS = 260;
  * still writing would otherwise log a second occurrence and advance twice.
  */
 const completing = new Set<string>();
+
+/**
+ * Collapses overlapping refreshes of one view into at most two passes: the
+ * one in flight and a single trailing re-run for everyone who arrived while
+ * it ran. A burst of N rapid mutations used to fan out into N full refetches
+ * per view at once (enough to exhaust memory on a big database); callers
+ * still always observe a refresh started at or after their call.
+ */
+function coalesceRefresh(fn: () => Promise<void>): () => Promise<void> {
+  let inflight: Promise<void> | null = null;
+  let trailing: Promise<void> | null = null;
+  const run = () => {
+    const p = fn().finally(() => {
+      if (inflight === p) inflight = null;
+    });
+    inflight = p;
+    return p;
+  };
+  return () => {
+    if (!inflight) return run();
+    if (!trailing) {
+      trailing = inflight
+        .catch(() => {})
+        .then(() => {
+          trailing = null;
+          return run();
+        });
+    }
+    return trailing;
+  };
+}
+
+/**
+ * Soft-deleted tasks whose shared Undo toast is still open. Deleting several
+ * tasks in a row folds into one growing batch: Undo brings them all back,
+ * and only the batch's own toast closing purges them.
+ */
+let pendingDeleteIds: string[] = [];
+/** Invalidates a superseded delete toast's expiry (bumped before each show). */
+let deleteBatchToken = 0;
 
 function patchTaskInState(
   set: (
@@ -99,6 +140,10 @@ interface TaskState {
   listTasks: Task[];
   loading: boolean;
   todayReady: boolean;
+  /** Whether older completed tasks remain beyond the pages loaded so far. */
+  doneHasMore: boolean;
+  /** Loads the next page of completed history into doneTasks. */
+  loadMoreDone: () => Promise<void>;
   refreshToday: () => Promise<void>;
   refreshTomorrow: () => Promise<void>;
   refreshLater: () => Promise<void>;
@@ -194,6 +239,7 @@ async function completeTaskInner(
     useToastStore.getState().show(
       `Done · next ${formatDisplayDate(result.dueDate)}`,
       {
+        key: 'recurring-done',
         action: {
           label: 'Undo',
           onPress: async () => {
@@ -223,8 +269,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   listTasks: [],
   loading: false,
   todayReady: false,
+  doneHasMore: false,
 
-  refreshToday: async () => {
+  refreshToday: coalesceRefresh(async () => {
     if (Platform.OS === 'web') {
       set({ todayTasks: [], todayCompletedTasks: [], todayReady: true });
       return;
@@ -235,9 +282,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       fetchTodayCompletedTasks(),
     ]);
     set({ todayTasks, todayCompletedTasks, todayReady: true });
-  },
+  }),
 
-  refreshTomorrow: async () => {
+  refreshTomorrow: coalesceRefresh(async () => {
     if (Platform.OS === 'web') {
       set({ tomorrowTasks: [], tomorrowCompletedTasks: [] });
       return;
@@ -248,9 +295,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       fetchTomorrowCompletedTasks(),
     ]);
     set({ tomorrowTasks, tomorrowCompletedTasks });
-  },
+  }),
 
-  refreshLater: async () => {
+  refreshLater: coalesceRefresh(async () => {
     if (Platform.OS === 'web') {
       set({ laterTasks: [] });
       return;
@@ -258,19 +305,37 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     const laterTasks = await fetchLaterTasks();
     set({ laterTasks });
-  },
+  }),
 
-  refreshDone: async () => {
+  // Resets to the first page; loadMoreDone walks further back on scroll. A
+  // refresh triggered while the user sits deep in the history keeps the pages
+  // already on screen by refetching the same span in one query.
+  refreshDone: coalesceRefresh(async () => {
     if (Platform.OS === 'web') {
-      set({ doneTasks: [] });
+      set({ doneTasks: [], doneHasMore: false });
       return;
     }
 
-    const doneTasks = await fetchDoneTasks();
-    set({ doneTasks });
+    const span = Math.max(get().doneTasks.length, DONE_PAGE_SIZE);
+    const doneTasks = await fetchDoneTasks(span);
+    set({ doneTasks, doneHasMore: doneTasks.length === span });
+  }),
+
+  loadMoreDone: async () => {
+    if (Platform.OS === 'web' || !get().doneHasMore) return;
+    const offset = get().doneTasks.length;
+    const page = await fetchDoneTasks(DONE_PAGE_SIZE, offset);
+    set((state) => {
+      // A refresh may have landed meanwhile; drop anything already shown.
+      const seen = new Set(state.doneTasks.map((task) => task.id));
+      return {
+        doneTasks: [...state.doneTasks, ...page.filter((t) => !seen.has(t.id))],
+        doneHasMore: page.length === DONE_PAGE_SIZE,
+      };
+    });
   },
 
-  refreshArchived: async () => {
+  refreshArchived: coalesceRefresh(async () => {
     if (Platform.OS === 'web') {
       set({ archivedTasks: [] });
       return;
@@ -278,7 +343,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     const archivedTasks = await taskRepository.getArchived();
     set({ archivedTasks });
-  },
+  }),
 
   refreshList: async (listId: string) => {
     if (Platform.OS === 'web') {
@@ -407,6 +472,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     // Archive takes the row out of every list at once, so offer a way back
     // right here; the task also stays reachable under Finished → Archived.
     useToastStore.getState().show('Archived', {
+      key: 'archive',
       action: {
         label: 'Undo',
         onPress: async () => {
@@ -447,21 +513,45 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     // during the Undo window (adding a task, switching tabs) keeps it hidden.
     removeTaskFromState(set, id);
     await taskRepository.softDelete(id);
+
+    // Deletes made while the Undo toast is open join one batch: showing a new
+    // toast fires the old one's onExpire, which used to make every delete but
+    // the last permanent the moment the next row was swiped away. The token
+    // turns the superseded toast's expiry into a no-op; only the batch's
+    // final toast settles it, for all its tasks at once.
+    pendingDeleteIds.push(id);
+    const token = ++deleteBatchToken;
+    const takeBatch = () => {
+      if (token !== deleteBatchToken) return null;
+      const ids = pendingDeleteIds;
+      pendingDeleteIds = [];
+      return ids;
+    };
     const refreshViews = async () => {
       await refreshAfterMutation(get, existing.listId);
       await get().refreshDone();
       await get().refreshArchived();
     };
-    useToastStore.getState().show('Deleted', {
+    const count = pendingDeleteIds.length;
+    useToastStore.getState().show(count > 1 ? `${count} deleted` : 'Deleted', {
+      key: 'delete-undo',
       action: {
         label: 'Undo',
         onPress: async () => {
-          await taskRepository.restoreDeleted(id);
+          const ids = takeBatch();
+          if (!ids) return;
+          for (const taskId of ids) {
+            await taskRepository.restoreDeleted(taskId);
+          }
           await refreshViews();
         },
       },
       onExpire: async () => {
-        await taskRepository.deletePermanent(id);
+        const ids = takeBatch();
+        if (!ids) return;
+        for (const taskId of ids) {
+          await taskRepository.deletePermanent(taskId);
+        }
         await refreshViews();
       },
     });
@@ -520,11 +610,30 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
   },
 
+  // Clearing hides the history first and only deletes for real once the Undo
+  // toast closes, matching how single deletes behave. Rows missed by the undo
+  // window (app killed mid-toast) are finished by purgeSoftDeleted at launch.
   clearFinishedTasks: async () => {
-    await taskRepository.clearCompleted();
-    await get().refreshDone();
-    await get().refreshToday();
-    await get().refreshTomorrow();
+    const marker = await taskRepository.softDeleteCompleted();
+    const refreshViews = async () => {
+      await get().refreshDone();
+      await get().refreshToday();
+      await get().refreshTomorrow();
+    };
+    await refreshViews();
+    useToastStore.getState().show('Finished tasks cleared', {
+      key: 'clear-finished',
+      action: {
+        label: 'Undo',
+        onPress: async () => {
+          await taskRepository.restoreClearedCompleted(marker);
+          await refreshViews();
+        },
+      },
+      onExpire: async () => {
+        await taskRepository.purgeClearedCompleted(marker);
+      },
+    });
   },
 
   scheduleTask: async (id, dueDate) => {

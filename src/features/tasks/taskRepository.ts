@@ -15,17 +15,44 @@ import { tomorrowIso } from '@/utils/scheduleDates';
 
 import {
   cancelReminderForTask,
+  cancelScheduledNotifications,
   scheduleReminderForTask,
 } from '../reminders/reminderService';
 
-async function nextSortOrder(listId: string): Promise<number> {
-  const db = await getDb();
-  const row = await db.getFirstAsync<{ maxOrder: number | null }>(
-    'SELECT MAX(sortOrder) as maxOrder FROM tasks WHERE listId = ? AND deletedAt IS NULL',
-    [listId]
-  );
-  return (row?.maxOrder ?? -1) + 1;
+/**
+ * Storage caps. The UI has no hard limits, so a paste of arbitrary size ends
+ * up here; past these lengths the extra text is unreadable in any view and
+ * only inflates every query that touches the row.
+ */
+export const MAX_TITLE_LENGTH = 500;
+export const MAX_NOTES_LENGTH = 10_000;
+
+function clampTitle(title: string): string {
+  return title.trim().slice(0, MAX_TITLE_LENGTH);
 }
+
+function clampNotes(notes: string | undefined): string | undefined {
+  return notes === undefined ? undefined : notes.slice(0, MAX_NOTES_LENGTH);
+}
+
+/**
+ * Completions already being written, keyed by task id. The store guards its
+ * own callers, but the repository must hold the line too: two racing
+ * complete() calls on a repeating task would each log an occurrence and
+ * advance the date twice. The second caller shares the first one's result.
+ */
+const completeInFlight = new Map<
+  string,
+  Promise<{ task: Task | null; occurrenceId?: string }>
+>();
+
+/**
+ * SQL fragment placing a new task after everything in its list. Evaluated
+ * inside the INSERT itself so two creates racing on the same list cannot
+ * read the same MAX and land on one sortOrder.
+ */
+const NEXT_SORT_ORDER_SQL =
+  '(SELECT COALESCE(MAX(sortOrder), -1) + 1 FROM tasks WHERE listId = ? AND deletedAt IS NULL)';
 
 /**
  * "Must do today" names a day, so a pinned task always carries one. Quick
@@ -50,6 +77,38 @@ function resolveDueDateForRecurrence(
   return todayDueIso();
 }
 
+/**
+ * Deletes every task matching `where` with two set-based statements instead
+ * of a per-row loop (clearing a long history used to issue thousands of
+ * DELETEs). OS notifications for the doomed tasks are cancelled first; the
+ * row deletes then run in one transaction, so a kill mid-way cannot leave
+ * half the set gone. A cancelled notification whose rows survive the kill is
+ * harmless: the next reminder sync reschedules from the tasks themselves.
+ */
+async function deleteTasksWhere(
+  where: string,
+  params: (string | number)[] = []
+): Promise<void> {
+  const db = await getDb();
+  const pending = await db.getAllAsync<{ notificationId: string | null }>(
+    `SELECT r.notificationId FROM reminders r
+     WHERE r.taskId IN (SELECT id FROM tasks WHERE ${where})`,
+    params
+  );
+  await cancelScheduledNotifications(
+    pending
+      .map((row) => row.notificationId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  );
+  await runInTransaction(async () => {
+    await db.runAsync(
+      `DELETE FROM reminders WHERE taskId IN (SELECT id FROM tasks WHERE ${where})`,
+      params
+    );
+    await db.runAsync(`DELETE FROM tasks WHERE ${where}`, params);
+  });
+}
+
 export const taskRepository = {
   async getById(id: string): Promise<Task | null> {
     const db = await getDb();
@@ -64,8 +123,6 @@ export const taskRepository = {
     const db = await getDb();
     const now = nowIso();
     const listId = input.listId ?? INBOX_LIST_ID;
-    const sortOrder =
-      input.sortOrder ?? (await nextSortOrder(listId));
     const recurrence = input.recurrence ?? DEFAULT_RECURRENCE;
     const priority = input.priority ?? 'normal';
     const dueDate = resolveDueDateForPriority(
@@ -75,8 +132,8 @@ export const taskRepository = {
 
     const task: Task = {
       id: createId(),
-      title: input.title.trim(),
-      notes: input.notes,
+      title: clampTitle(input.title),
+      notes: clampNotes(input.notes),
       status: 'active',
       priority,
       color: input.color,
@@ -84,14 +141,14 @@ export const taskRepository = {
       reminderAt: input.reminderAt,
       recurrence,
       listId,
-      sortOrder,
+      sortOrder: input.sortOrder ?? 0,
       createdAt: now,
       updatedAt: now,
     };
 
     await db.runAsync(
       `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, listId, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ${NEXT_SORT_ORDER_SQL}), ?, ?)`,
       [
         task.id,
         task.title,
@@ -103,11 +160,20 @@ export const taskRepository = {
         task.reminderAt ?? null,
         task.recurrence,
         task.listId ?? INBOX_LIST_ID,
-        task.sortOrder,
+        input.sortOrder ?? null,
+        task.listId ?? INBOX_LIST_ID,
         task.createdAt,
         task.updatedAt,
       ]
     );
+
+    if (input.sortOrder === undefined) {
+      const row = await db.getFirstAsync<{ sortOrder: number }>(
+        'SELECT sortOrder FROM tasks WHERE id = ?',
+        [task.id]
+      );
+      task.sortOrder = row?.sortOrder ?? 0;
+    }
 
     if (task.reminderAt) {
       await scheduleReminderForTask(task);
@@ -138,6 +204,8 @@ export const taskRepository = {
       dueDate,
       updatedAt: now,
     };
+    if (input.title !== undefined) updated.title = clampTitle(input.title);
+    if (input.notes !== undefined) updated.notes = clampNotes(input.notes);
     if ('recurringTaskId' in input) {
       updated.recurringTaskId = input.recurringTaskId;
     }
@@ -231,6 +299,20 @@ export const taskRepository = {
   async complete(
     id: string
   ): Promise<{ task: Task | null; occurrenceId?: string }> {
+    // A second complete arriving while the first is writing joins it instead
+    // of logging another occurrence and advancing the date twice.
+    const inFlight = completeInFlight.get(id);
+    if (inFlight) return inFlight;
+    const work = this.completeInner(id).finally(() => {
+      completeInFlight.delete(id);
+    });
+    completeInFlight.set(id, work);
+    return work;
+  },
+
+  async completeInner(
+    id: string
+  ): Promise<{ task: Task | null; occurrenceId?: string }> {
     const existing = await this.getById(id);
     if (!existing) return { task: null };
 
@@ -244,16 +326,20 @@ export const taskRepository = {
       const priority =
         existing.priority === 'must_do_today' ? 'normal' : existing.priority;
 
-      const occurrenceId = await this.logRecurringOccurrence(existing);
-      const task = await this.update(id, {
-        status: 'active',
-        completedAt: undefined,
-        dueDate: nextDue,
-        reminderAt,
-        snoozedUntil: undefined,
-        priority,
+      // Atomic: a kill between logging the occurrence and advancing the date
+      // must not leave a logged repeat whose live task never moved on.
+      return runInTransaction(async () => {
+        const occurrenceId = await this.logRecurringOccurrence(existing);
+        const task = await this.update(id, {
+          status: 'active',
+          completedAt: undefined,
+          dueDate: nextDue,
+          reminderAt,
+          snoozedUntil: undefined,
+          priority,
+        });
+        return { task, occurrenceId };
       });
-      return { task, occurrenceId };
     }
 
     // The reminder is kept on the task: completing cancels the pending
@@ -362,13 +448,7 @@ export const taskRepository = {
    * Only safe at launch, when no Undo toast can be pending.
    */
   async purgeSoftDeleted(): Promise<void> {
-    const db = await getDb();
-    const rows = await db.getAllAsync<{ id: string }>(
-      'SELECT id FROM tasks WHERE deletedAt IS NOT NULL'
-    );
-    for (const row of rows) {
-      await this.deletePermanent(row.id);
-    }
+    await deleteTasksWhere('deletedAt IS NOT NULL');
   },
 
   async deletePermanent(id: string): Promise<void> {
@@ -396,10 +476,36 @@ export const taskRepository = {
   async reorderTasks(orderedIds: string[]): Promise<void> {
     if (orderedIds.length === 0) return;
     const db = await getDb();
+
+    // A drag usually moves one task a few slots; only rows whose position
+    // actually changed are written, so reordering doesn't touch (and stamp
+    // updatedAt on) every task in the list.
+    const current = new Map<string, number>();
+    const CHUNK = 500; // stay under SQLite's bound-parameter limit
+    for (let i = 0; i < orderedIds.length; i += CHUNK) {
+      const chunk = orderedIds.slice(i, i + CHUNK);
+      const rows = await db.getAllAsync<{ id: string; sortOrder: number }>(
+        `SELECT id, sortOrder FROM tasks WHERE deletedAt IS NULL AND id IN (${chunk
+          .map(() => '?')
+          .join(',')})`,
+        chunk
+      );
+      for (const row of rows) current.set(row.id, row.sortOrder);
+    }
+
+    const changes: [string, number][] = [];
+    for (const [index, id] of orderedIds.entries()) {
+      const existing = current.get(id);
+      if (existing !== undefined && existing !== index) {
+        changes.push([id, index]);
+      }
+    }
+    if (changes.length === 0) return;
+
     const now = nowIso();
     // One transaction: a kill mid-way must not leave half the list reordered.
     await runInTransaction(async () => {
-      for (const [index, id] of orderedIds.entries()) {
+      for (const [id, index] of changes) {
         await db.runAsync(
           'UPDATE tasks SET sortOrder = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
           [index, now, id]
@@ -441,16 +547,38 @@ export const taskRepository = {
   },
 
   async clearCompleted(): Promise<void> {
+    await deleteTasksWhere(`status = 'completed' AND deletedAt IS NULL`);
+  },
+
+  /**
+   * Hides the whole completed history behind one Undo window. All rows are
+   * stamped with the same deletedAt, which doubles as the batch handle for
+   * restoreClearedCompleted / purgeClearedCompleted. Completed rows carry no
+   * scheduled notifications, so there is nothing to cancel here.
+   */
+  async softDeleteCompleted(): Promise<string> {
     const db = await getDb();
-    const rows = await db.getAllAsync<{ id: string }>(
-      `SELECT id FROM tasks WHERE status = 'completed' AND deletedAt IS NULL`
+    const marker = nowIso();
+    await db.runAsync(
+      `UPDATE tasks SET deletedAt = ?, updatedAt = ?
+       WHERE status = 'completed' AND deletedAt IS NULL`,
+      [marker, marker]
     );
-    // All or nothing, so a kill mid-way cannot leave half the history gone.
-    await runInTransaction(async () => {
-      for (const row of rows) {
-        await this.deletePermanent(row.id);
-      }
-    });
+    return marker;
+  },
+
+  /** Reverses softDeleteCompleted for one batch (the Undo path). */
+  async restoreClearedCompleted(marker: string): Promise<void> {
+    const db = await getDb();
+    await db.runAsync(
+      'UPDATE tasks SET deletedAt = NULL, updatedAt = ? WHERE deletedAt = ?',
+      [nowIso(), marker]
+    );
+  },
+
+  /** Makes one softDeleteCompleted batch permanent (the Undo window closing). */
+  async purgeClearedCompleted(marker: string): Promise<void> {
+    await deleteTasksWhere('deletedAt = ?', [marker]);
   },
 
   async countActiveByList(): Promise<Record<string, number>> {

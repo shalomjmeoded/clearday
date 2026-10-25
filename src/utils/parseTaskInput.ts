@@ -76,6 +76,10 @@ function parseTimeToken(
     let hour = parseInt(match12[1], 10);
     const minute = match12[2] ? parseInt(match12[2], 10) : 0;
     const meridiem = match12[3];
+    // "17pm" is redundant but unambiguous; "15am" and "25pm" are not times
+    // and stay in the title rather than rolling into the wrong day.
+    if (hour < 1 || hour > 23 || minute > 59) return undefined;
+    if (meridiem === 'am' && hour > 12) return undefined;
     if (meridiem === 'pm' && hour < 12) hour += 12;
     if (meridiem === 'am' && hour === 12) hour = 0;
     return setMinutes(setHours(baseDay, hour), minute);
@@ -84,6 +88,9 @@ function parseTimeToken(
   if (match24) {
     const hour = parseInt(match24[1], 10);
     const minute = parseInt(match24[2], 10);
+    // JS Date would roll "25:99" into the next day; an invalid clock time
+    // is not a time at all and stays in the title.
+    if (hour > 23 || minute > 59) return undefined;
     return setMinutes(setHours(baseDay, hour), minute);
   }
   return undefined;
@@ -122,11 +129,13 @@ export function parseTaskInput(
     const token = tokens[index];
     const lower = token.toLowerCase();
 
-    if (lower === 'p1' || lower === 'p0') {
+    // Standalone priority marks work anywhere, not just as a leading prefix
+    // ("buy milk !! today" used to keep the "!!" in the title).
+    if (token === '!!' || lower === 'p1' || lower === 'p0') {
       priority = 'must_do_today';
       continue;
     }
-    if (lower === 'p2' || lower === 'p!') {
+    if (token === '!' || lower === 'p2' || lower === 'p!') {
       priority = 'important';
       continue;
     }
@@ -187,6 +196,16 @@ export function parseTaskInput(
       baseDay = startOfDay(WEEKDAYS[lower](now));
       dueDate = baseDay;
       explicitDay = true;
+      continue;
+    }
+
+    // "at" is part of the time phrase, not the title — but only when a valid
+    // time actually follows ("lunch at noon-ish" keeps its "at").
+    if (
+      lower === 'at' &&
+      index + 1 < tokens.length &&
+      parseTimeToken(tokens[index + 1], baseDay)
+    ) {
       continue;
     }
 

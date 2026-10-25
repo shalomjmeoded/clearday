@@ -46,5 +46,6 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status_dueDate ON tasks(status, dueDate);
 CREATE INDEX IF NOT EXISTS idx_tasks_listId_sortOrder ON tasks(listId, sortOrder);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_completedAt ON tasks(status, completedAt);
 CREATE INDEX IF NOT EXISTS idx_reminders_taskId ON reminders(taskId);
 `;
