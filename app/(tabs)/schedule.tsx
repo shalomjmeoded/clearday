@@ -27,7 +27,7 @@ export default function ScheduleScreen() {
   const completeTask = useTaskStore((s) => s.completeTask);
   const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
-  const deleteTask = useTaskStore((s) => s.deleteTask);
+  const deleteTaskWithUndo = useTaskStore((s) => s.deleteTaskWithUndo);
   const setImportant = useTaskStore((s) => s.setImportant);
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
@@ -120,18 +120,9 @@ export default function ScheduleScreen() {
             await archiveTask(id);
           }}
           onMoveTomorrow={moveToTomorrow}
-          onDelete={(id) => {
-            Alert.alert('Delete task?', 'This cannot be undone.', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  await triggerLightHaptic();
-                  await deleteTask(id);
-                },
-              },
-            ]);
+          onDelete={async (id) => {
+            await triggerLightHaptic();
+            await deleteTaskWithUndo(id);
           }}
           onSetImportant={setImportant}
           onToggleRecurring={toggleRecurring}

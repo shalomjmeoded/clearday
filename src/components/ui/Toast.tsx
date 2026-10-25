@@ -6,6 +6,7 @@ import { FullWindowOverlay } from 'react-native-screens';
 
 import { getTabBarHeight, MIN_TOUCH_TARGET } from '@/constants/layout';
 import { useToastStore } from '@/store/toastStore';
+import { elevation } from '@/theme/elevation';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -45,7 +46,7 @@ export function Toast() {
 
   const runAction = async () => {
     await triggerLightHaptic();
-    dismiss(toast.id);
+    dismiss(toast.id, { ranAction: true });
     await toast.action?.onPress();
   };
 
@@ -118,11 +119,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     paddingLeft: spacing.md,
     paddingRight: spacing.xs,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    ...elevation.overlay,
   },
   message: { flexShrink: 1, paddingVertical: spacing.sm },
   action: {

@@ -239,7 +239,7 @@ export default function SettingsScreen() {
             onChange={(t) => update('theme', t)}
           />
           <Text style={[typography.meta, styles.hint, { color: tokens.mutedText }]}>
-            List color
+            App color
           </Text>
           <SettingsChips
             options={COLOR_THEME_OPTIONS}
@@ -272,7 +272,7 @@ export default function SettingsScreen() {
             onPress={() => router.push('/pro')}
           />
           <SettingsRow
-            label="Recurring Task"
+            label="Recurring Tasks"
             value={isPro ? 'Included' : 'Pro'}
             valueMuted={!isPro}
             onPress={() => router.push('/recurring')}

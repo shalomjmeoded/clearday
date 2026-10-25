@@ -95,6 +95,10 @@ export default function RootLayout() {
         ]);
 
         await initDatabase();
+        // Deletes whose Undo toast never expired (app closed mid-window).
+        void import('@/features/tasks/taskRepository').then(({ taskRepository }) =>
+          taskRepository.purgeSoftDeleted()
+        );
         // A damaged file is rare but, without this, would surface as missing
         // tasks with no explanation. The check is linear and cheap here.
         void import('@/db/snapshot').then(async ({ checkIntegrity, getSnapshotInfo, restoreSnapshot }) => {

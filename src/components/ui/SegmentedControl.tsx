@@ -1,6 +1,6 @@
-import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { elevation } from '@/theme/elevation';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -33,14 +33,8 @@ export function SegmentedControl({ segments, value, onChange }: Props) {
             }}
             style={[
               styles.segment,
-              active && {
-                backgroundColor: tokens.card,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.06,
-                shadowRadius: 4,
-                elevation: 2,
-              },
+              active && { backgroundColor: tokens.card },
+              active && elevation.raised,
             ]}
           >
             <Text

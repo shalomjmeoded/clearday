@@ -64,10 +64,24 @@ export default function ListEditScreen() {
     try {
       await triggerLightHaptic();
       await renameList(listId, trimmed);
-      await setListColor(listId, color);
       router.back();
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Color saves the moment it is tapped, like task detail does.
+  const pickColor = async (swatch: string) => {
+    if (!listId) return;
+    Keyboard.dismiss();
+    await triggerLightHaptic();
+    const previous = color;
+    setColor(swatch);
+    try {
+      await setListColor(listId, swatch);
+    } catch {
+      setColor(previous);
+      Alert.alert('Could not save color', 'Please try again.');
     }
   };
 
@@ -151,11 +165,7 @@ export default function ListEditScreen() {
           {LIST_COLORS.map((swatch) => (
             <Pressable
               key={swatch}
-              onPress={async () => {
-                Keyboard.dismiss();
-                await triggerLightHaptic();
-                setColor(swatch);
-              }}
+              onPress={() => pickColor(swatch)}
               accessibilityRole="button"
               accessibilityLabel="Choose list color"
               style={[

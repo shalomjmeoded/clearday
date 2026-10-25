@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
+import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -17,7 +18,9 @@ export default function TabLayout() {
   const screenOptions = useMemo(
     () => ({
       headerShown: false,
-      tabBarHideOnKeyboard: true,
+      // The tab bar stays in place; the keyboard simply covers it and the
+      // sticky input bar travels up over it. Hiding the bar used to resize
+      // the scene mid-animation, which made the input bar jump.
       lazy: false,
       sceneStyle: { backgroundColor: tokens.background },
       tabBarActiveTintColor: tokens.accent,
@@ -25,7 +28,7 @@ export default function TabLayout() {
       tabBarStyle: {
         backgroundColor: tokens.tabBar,
         borderTopColor: tokens.border,
-        borderTopWidth: 0.5,
+        borderTopWidth: StyleSheet.hairlineWidth,
         height: tabBarHeight,
         paddingTop: TAB_BAR_PADDING_TOP,
         paddingBottom: bottom,
@@ -45,8 +48,8 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Today',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="sunny-outline" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'sunny' : 'sunny-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -54,8 +57,8 @@ export default function TabLayout() {
         name="schedule"
         options={{
           title: 'Schedule',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'calendar' : 'calendar-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -63,8 +66,8 @@ export default function TabLayout() {
         name="lists"
         options={{
           title: 'Lists',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="folder-outline" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'folder' : 'folder-outline'} size={size} color={color} />
           ),
         }}
       />

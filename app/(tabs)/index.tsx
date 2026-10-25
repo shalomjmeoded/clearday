@@ -12,12 +12,13 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import Animated, { ZoomIn, ZoomOut } from 'react-native-reanimated';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { TaskList } from '@/components/tasks/TaskList';
 import { INBOX_LIST_ID } from '@/db/constants';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
-import { spacing } from '@/theme/spacing';
+import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useListStore } from '@/store/listStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -73,7 +74,7 @@ export default function TodayScreen() {
   const completeTask = useTaskStore((s) => s.completeTask);
   const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
-  const deleteTask = useTaskStore((s) => s.deleteTask);
+  const deleteTaskWithUndo = useTaskStore((s) => s.deleteTaskWithUndo);
   const setImportant = useTaskStore((s) => s.setImportant);
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
@@ -293,17 +294,8 @@ export default function TodayScreen() {
   };
 
   const handleDelete = async (id: string) => {
-    Alert.alert('Delete task?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await triggerLightHaptic();
-          await deleteTask(id);
-        },
-      },
-    ]);
+    await triggerLightHaptic();
+    await deleteTaskWithUndo(id);
   };
 
   const handleAdd = async (text: string, options?: QuickAddOptions) => {
@@ -340,12 +332,6 @@ export default function TodayScreen() {
     setSearchQuery('');
   };
 
-  const openLists = async () => {
-    Keyboard.dismiss();
-    await triggerMediumHaptic();
-    router.push('/lists');
-  };
-
   const toggleOrder = async () => {
     Keyboard.dismiss();
     await triggerLightHaptic();
@@ -359,17 +345,29 @@ export default function TodayScreen() {
           <Text style={[typography.heroTitle, { color: tokens.text }]}>
             Today
           </Text>
-          <Text
-            style={[
-              typography.caption,
-              styles.date,
-              { color: tokens.mutedText },
-            ]}
+          <Pressable
+            onPress={async () => {
+              await triggerLightHaptic();
+              router.push('/lists');
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Change which list Today shows"
           >
-            {formatHeaderDate()}
-            {' · '}
-            {lists.find((list) => list.id === defaultListId)?.name ?? 'Inbox'}
-          </Text>
+            <Text
+              style={[
+                typography.caption,
+                styles.date,
+                { color: tokens.mutedText },
+              ]}
+            >
+              {formatHeaderDate()}
+              {' · '}
+              <Text style={{ color: tokens.accent }}>
+                {lists.find((list) => list.id === defaultListId)?.name ?? 'Inbox'}
+              </Text>
+            </Text>
+          </Pressable>
         </View>
         <Pressable
           onPress={openFocus}
@@ -410,19 +408,17 @@ export default function TodayScreen() {
             onPress={toggleSearch}
             style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
             hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Search tasks"
           >
             <Ionicons name="search-outline" size={19} color={tokens.text} />
           </Pressable>
           <Pressable
-            onPress={openLists}
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
-            hitSlop={10}
-          >
-            <Ionicons name="folder-outline" size={19} color={tokens.text} />
-          </Pressable>
-          <Pressable
             onPress={openSettings}
             style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
           >
             <Ionicons name="settings-outline" size={19} color={tokens.text} />
           </Pressable>
@@ -498,7 +494,7 @@ export default function TodayScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.statusTabs}
+        contentContainerStyle={[styles.statusTabs, { borderBottomColor: tokens.border }]}
       >
         {statusTabs.map((tab) => {
           const active = statusFilter === tab.key;
@@ -515,7 +511,11 @@ export default function TodayScreen() {
                   { color: active ? tokens.text : tokens.mutedText },
                 ]}
               >
-                {tab.label} ({tab.count})
+                {tab.label}
+                <Text style={[styles.statusTabCount, { color: tokens.mutedText }]}>
+                  {'  '}
+                  {tab.count}
+                </Text>
               </Text>
               {active ? (
                 <View style={[styles.activeUnderline, { backgroundColor: tokens.text }]} />
@@ -539,18 +539,23 @@ export default function TodayScreen() {
       onDismissEmpty={closeQuickAddAfterKeyboard}
       inactiveInputContent={
         <View style={styles.idleAddWrap}>
-          <Pressable
-            onPress={focusQuickAdd}
-            style={({ pressed }) => [
-              styles.idleAddButton,
-              { backgroundColor: tokens.accent },
-              pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Add task"
+          <Animated.View
+            entering={ZoomIn.duration(180)}
+            exiting={ZoomOut.duration(130)}
           >
-            <Ionicons name="add" size={26} color="#fff" />
-          </Pressable>
+            <Pressable
+              onPress={focusQuickAdd}
+              style={({ pressed }) => [
+                styles.idleAddButton,
+                { backgroundColor: tokens.accent },
+                pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Add task"
+            >
+              <Ionicons name="add" size={26} color={tokens.onAccent} />
+            </Pressable>
+          </Animated.View>
         </View>
       }
     >
@@ -614,23 +619,22 @@ const styles = StyleSheet.create({
   headerText: { flexShrink: 0 },
   headerActions: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   iconBtn: {
-    minWidth: 25,
-    minHeight: 28,
+    minWidth: 36,
+    minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sortPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    borderRadius: 24,
+    gap: spacing.xs,
+    borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: spacing.xs,
-    minHeight: 25,
-    flex: 1,
+    paddingHorizontal: spacing.sm + 2,
+    minHeight: 32,
     justifyContent: 'center',
   },
-  sortText: { fontSize: 12, lineHeight: 15 },
+  sortText: { fontSize: 13, lineHeight: 17 },
   searchWrap: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xs,
@@ -662,7 +666,7 @@ const styles = StyleSheet.create({
   sortMenu: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
@@ -677,7 +681,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.md + 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2F3638',
   },
   statusTab: {
     minHeight: 38,
@@ -686,23 +689,19 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm + 2,
   },
   statusTabText: { fontSize: 16, lineHeight: 21 },
+  statusTabCount: { fontSize: 13, fontWeight: '500' },
   activeUnderline: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: -1,
-    height: 4,
-    borderRadius: 3,
+    height: 2,
+    borderRadius: 1,
   },
-  date: { marginTop: -2 },
-  defaultHint: {
-    marginTop: 0,
-    textTransform: 'none',
-    letterSpacing: 0,
-  },
+  date: { marginTop: spacing.xs },
   focusBtn: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 999,
+    borderRadius: radius.full,
     paddingHorizontal: spacing.md,
     justifyContent: 'center',
     alignItems: 'center',

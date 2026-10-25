@@ -13,6 +13,7 @@ import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { INBOX_LIST_ID } from '@/db/constants';
 import { canCreateCustomList } from '@/features/pro/subscriptionService';
+import { taskRepository } from '@/features/tasks/taskRepository';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useListStore } from '@/store/listStore';
@@ -22,7 +23,6 @@ import { useTheme } from '@/theme/ThemeProvider';
 import {
   triggerLightHaptic,
   triggerMediumHaptic,
-  triggerSelectionHaptic,
 } from '@/utils/haptics';
 
 export default function ListsScreen() {
@@ -30,18 +30,29 @@ export default function ListsScreen() {
   const scrollRef = useRef<ScrollScreenHandle>(null);
   const isPro = useProStore((s) => s.isPro);
   const defaultListId = useSettingsStore((s) => s.settings.defaultListId);
-  const setSetting = useSettingsStore((s) => s.setSetting);
   const lists = useListStore((s) => s.lists);
   const refresh = useListStore((s) => s.refresh);
   const createList = useListStore((s) => s.createList);
   const [showCreate, setShowCreate] = useState(false);
+  const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
 
   const customListCount = lists.filter((l) => l.id !== INBOX_LIST_ID).length;
   const atListLimit = !isPro && customListCount >= 1;
+  const totalOpen = Object.values(taskCounts).reduce((sum, n) => sum + n, 0);
+  const summary = `${lists.length} ${lists.length === 1 ? 'list' : 'lists'} · ${totalOpen} open ${
+    totalOpen === 1 ? 'task' : 'tasks'
+  }`;
 
   useFocusEffect(
     useCallback(() => {
       refresh();
+      let cancelled = false;
+      taskRepository.countActiveByList().then((counts) => {
+        if (!cancelled) setTaskCounts(counts);
+      });
+      return () => {
+        cancelled = true;
+      };
     }, [refresh])
   );
 
@@ -87,10 +98,15 @@ export default function ListsScreen() {
     router.push(`/list/${listId}`);
   };
 
+  const openList = async (listId: string) => {
+    await triggerLightHaptic();
+    router.push(`/lists/${listId}`);
+  };
+
   return (
     <ScrollScreen
       ref={scrollRef}
-      header={<ScreenHeader title="Lists" />}
+      header={<ScreenHeader title="Lists" subtitle={summary} />}
       contentContainerStyle={styles.scroll}
       bottomOffset={56}
     >
@@ -101,16 +117,21 @@ export default function ListsScreen() {
           <ListRow
             key={item.id}
             name={item.name}
+            color={item.color}
+            taskCount={taskCounts[item.id] ?? 0}
             isTodayDefault={isTodayDefault}
-            onPress={async () => {
-              await triggerSelectionHaptic();
-              await setSetting('defaultListId', item.id);
-              router.push('/');
-            }}
+            onPress={() => openList(item.id)}
             onLongPress={() => openListEdit(item.id)}
           />
         );
       })}
+
+      {customListCount === 0 && !showCreate ? (
+        <Text style={[typography.body, styles.intro, { color: tokens.mutedText }]}>
+          Lists keep work, home, and errands apart. Anything added without a
+          list lands in Inbox.
+        </Text>
+      ) : null}
 
       {showCreate ? (
         <ListCreateForm
@@ -135,6 +156,10 @@ export default function ListsScreen() {
           </Text>
         </Pressable>
       ) : null}
+
+      <Text style={[typography.meta, styles.footerHint, { color: tokens.mutedText }]}>
+        Tap a list to open it · long-press to rename
+      </Text>
     </ScrollScreen>
   );
 }
@@ -152,5 +177,16 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     paddingVertical: spacing.sm,
     alignItems: 'center',
+  },
+  intro: {
+    lineHeight: 22,
+    paddingHorizontal: spacing.xs,
+    paddingTop: spacing.sm,
+  },
+  footerHint: {
+    textAlign: 'center',
+    marginTop: spacing.lg,
+    fontWeight: '400',
+    letterSpacing: 0,
   },
 });

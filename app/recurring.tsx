@@ -36,9 +36,6 @@ export default function RecurringTasksScreen() {
       />
       <FormScreen modalHeader>
         <View style={styles.center}>
-          <Text style={[typography.heroTitle, styles.title, { color: tokens.text }]}>
-            Recurring Tasks
-          </Text>
           <Text style={[typography.body, styles.body, { color: tokens.mutedText }]}>
             {isPro
               ? 'Daily, weekly, monthly, and yearly tasks that come back on their own.'
@@ -83,12 +80,11 @@ export default function RecurringTasksScreen() {
 
 const styles = StyleSheet.create({
   center: {
-    paddingTop: spacing.xl,
+    paddingTop: spacing.md,
     paddingBottom: spacing.lg,
     alignItems: 'center',
     gap: spacing.md,
   },
-  title: { textAlign: 'center' },
   body: { textAlign: 'center', lineHeight: 22, paddingHorizontal: spacing.lg },
   sectionLabel: {
     marginTop: spacing.lg,

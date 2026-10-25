@@ -8,7 +8,7 @@ import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { TaskCheckbox } from '@/components/tasks/TaskCheckbox';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
-import { useFocusStore } from '@/store/focusStore';
+import { MAX_FOCUS, useFocusStore } from '@/store/focusStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import {
@@ -137,7 +137,9 @@ export default function FocusScreen() {
         <View style={styles.headerSpacer} />
       </View>
       <Text style={[typography.body, styles.hint, { color: tokens.mutedText }]}>
-        Pick up to 3 tasks for today.
+        {selectedIds.length === 0
+          ? `Pick up to ${MAX_FOCUS} tasks for today.`
+          : `${selectedIds.length} of ${MAX_FOCUS} picked.`}
       </Text>
       <ScrollView
         style={{ flex: 1, backgroundColor: tokens.background }}
@@ -146,13 +148,17 @@ export default function FocusScreen() {
       >
         {todayTasks.map((task) => {
           const selected = selectedIds.includes(task.id);
+          const atLimit = !selected && selectedIds.length >= MAX_FOCUS;
           return (
             <Pressable
               key={task.id}
               onPress={() => handleToggle(task.id)}
+              disabled={atLimit}
+              accessibilityState={{ selected, disabled: atLimit }}
               style={({ pressed }) => [
                 styles.pickRow,
                 { borderBottomColor: tokens.border },
+                atLimit && styles.pickRowDisabled,
                 pressed && { opacity: 0.85 },
               ]}
             >
@@ -214,6 +220,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: MIN_TOUCH_TARGET + 8,
   },
+  pickRowDisabled: { opacity: 0.4 },
   pickCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2 },
   focusRow: {
     flexDirection: 'row',

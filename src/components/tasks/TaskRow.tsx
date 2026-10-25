@@ -1,13 +1,9 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import {
-  type LayoutChangeEvent,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
+  FadeInDown,
+  FadeOut,
   interpolate,
   useAnimatedStyle,
   useSharedValue,
@@ -45,7 +41,6 @@ interface Props {
   onDragActivate?: () => void;
   isDragging?: boolean;
   swipeEnabled?: boolean;
-  onRowLayout?: (layout: { height: number; width: number; y: number }) => void;
   compact?: boolean;
   /** Row of an archived task: the primary action brings it back rather than completing it. */
   restoreMode?: boolean;
@@ -64,7 +59,6 @@ function TaskRowInner({
   onDragActivate,
   isDragging = false,
   swipeEnabled = true,
-  onRowLayout,
   compact = false,
   restoreMode = false,
 }: Props) {
@@ -150,10 +144,6 @@ function TaskRowInner({
     []
   );
 
-  const handleLayout = (event: LayoutChangeEvent) => {
-    onRowLayout?.(event.nativeEvent.layout);
-  };
-
   useEffect(() => {
     progress.set(withTiming(completed ? 1 : 0, { duration: 240 }));
   }, [completed, progress]);
@@ -175,7 +165,8 @@ function TaskRowInner({
         style={[styles.iconAction, { backgroundColor: tokens.danger }]}
         onPress={() => runAction(onDelete)}
       >
-        <Ionicons name="trash-outline" size={16} color="#fff" />
+        <Ionicons name="trash-outline" size={16} color={tokens.onAccent} />
+        <Text style={[styles.actionLabel, { color: tokens.onAccent }]}>Delete</Text>
       </RectButton>
       <RectButton
         accessibilityRole="button"
@@ -183,7 +174,8 @@ function TaskRowInner({
         style={[styles.iconAction, { backgroundColor: tokens.actionEdit }]}
         onPress={() => runAction(onPress)}
       >
-        <Ionicons name="create-outline" size={16} color="#fff" />
+        <Ionicons name="create-outline" size={16} color={tokens.onAccent} />
+        <Text style={[styles.actionLabel, { color: tokens.onAccent }]}>Edit</Text>
       </RectButton>
       <RectButton
         accessibilityRole="button"
@@ -191,7 +183,8 @@ function TaskRowInner({
         style={[styles.iconAction, { backgroundColor: tokens.swipeArchive }]}
         onPress={() => runAction(onArchive)}
       >
-        <Ionicons name="archive-outline" size={16} color="#fff" />
+        <Ionicons name="archive-outline" size={16} color={tokens.onAccent} />
+        <Text style={[styles.actionLabel, { color: tokens.onAccent }]}>Archive</Text>
       </RectButton>
     </View>
   );
@@ -209,9 +202,9 @@ function TaskRowInner({
         <Ionicons
           name={task.priority === 'important' ? 'star' : 'star-outline'}
           size={16}
-          color="#fff"
+          color={tokens.onAccent}
         />
-        <Text style={styles.actionLabel}>
+        <Text style={[styles.actionLabel, { color: tokens.onAccent }]}>
           {task.priority === 'important' ? 'Unstar' : 'Star'}
         </Text>
       </RectButton>
@@ -228,9 +221,9 @@ function TaskRowInner({
           <Ionicons
             name={isRecurring(task.recurrence) ? 'repeat' : 'repeat-outline'}
             size={16}
-            color="#fff"
+            color={tokens.onAccent}
           />
-          <Text style={styles.actionLabel}>
+          <Text style={[styles.actionLabel, { color: tokens.onAccent }]}>
             {isRecurring(task.recurrence) ? 'Stop' : 'Repeat'}
           </Text>
         </RectButton>
@@ -248,13 +241,13 @@ function TaskRowInner({
             restoreMode
               ? 'arrow-undo-outline'
               : completed
-                ? 'mail-unread-outline'
-                : 'mail-open-outline'
+                ? 'arrow-undo-outline'
+                : 'checkmark-circle-outline'
           }
           size={16}
-          color="#fff"
+          color={tokens.onAccent}
         />
-        <Text style={styles.actionLabel}>
+        <Text style={[styles.actionLabel, { color: tokens.onAccent }]}>
           {restoreMode ? 'Restore' : completed ? 'Todo' : 'Done'}
         </Text>
       </RectButton>
@@ -370,22 +363,21 @@ function TaskRowInner({
         {completed ? (
           <View style={[styles.doneMarker, { backgroundColor: tokens.actionRead }]} />
         ) : null}
-        {showPriorityMarker ? (
+        {task.priority === 'important' ? (
           <Pressable
             onPress={onPin}
             hitSlop={10}
             style={styles.pinButton}
             accessibilityRole="button"
-            accessibilityLabel={
-              task.priority === 'important' ? 'Unstar task' : 'Clear priority'
-            }
+            accessibilityLabel="Unstar task"
           >
-            <Ionicons
-              name={task.priority === 'important' ? 'star' : 'alert-circle'}
-              size={14}
-              color={tokens.actionPin}
-            />
+            <Ionicons name="star" size={14} color={tokens.actionPin} />
           </Pressable>
+        ) : showPriorityMarker ? (
+          // Pinned-to-today is shown, not toggled, here; it is cleared from task detail.
+          <View style={styles.pinButton} accessibilityLabel="Pinned to today">
+            <Ionicons name="pin" size={14} color={tokens.accent} />
+          </View>
         ) : null}
       </View>
       {content}
@@ -394,7 +386,8 @@ function TaskRowInner({
 
   return (
     <Animated.View
-      onLayout={handleLayout}
+      entering={FadeInDown.duration(220)}
+      exiting={FadeOut.duration(140)}
       style={[styles.outer, compact && styles.outerCompact]}
     >
       <Swipeable
@@ -520,7 +513,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   actionLabel: {
-    color: '#fff',
     fontSize: 10,
     lineHeight: 12,
     fontWeight: '700',

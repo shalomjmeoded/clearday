@@ -5,6 +5,7 @@ import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { triggerSelectionHaptic } from '@/utils/haptics';
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
 
 export function TaskColorPicker({ visible, selectedColor, onClose, onSelect }: Props) {
   const { tokens } = useTheme();
+  // Keep the card clear of the home indicator / gesture bar.
+  const sheetBottomMargin = Math.max(useSafeAreaInsets().bottom + spacing.sm, spacing.xl);
 
   const pick = async (color: string | null) => {
     await triggerSelectionHaptic();
@@ -27,7 +30,7 @@ export function TaskColorPicker({ visible, selectedColor, onClose, onSelect }: P
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable
-          style={[styles.sheet, { backgroundColor: tokens.background, borderColor: tokens.border }]}
+          style={[styles.sheet, { backgroundColor: tokens.background, borderColor: tokens.border, marginBottom: sheetBottomMargin }]}
           onPress={(e) => e.stopPropagation()}
         >
           <Text style={[typography.caption, styles.title, { color: tokens.mutedText }]}>
@@ -76,7 +79,6 @@ const styles = StyleSheet.create({
   },
   sheet: {
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     padding: spacing.md,

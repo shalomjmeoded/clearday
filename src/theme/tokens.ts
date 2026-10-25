@@ -34,7 +34,8 @@ export const lightTheme: ThemeTokens = {
   inputBg: '#FFFDF9',
   checkboxFill: '#4F6B52',
   swipeTomorrow: '#5A7A5E',
-  swipeArchive: '#9A9690',
+  // Dark enough that the white icon/label on the archive action stays legible.
+  swipeArchive: '#807C75',
   sectionBg: '#EFEBE3',
   onAccent: '#FFFDF9',
   paperLine: '#E7DCC7',

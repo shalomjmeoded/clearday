@@ -53,6 +53,27 @@ function patchTaskInState(
   }));
 }
 
+function removeTaskFromState(
+  set: (
+    partial:
+      | Partial<TaskState>
+      | ((state: TaskState) => Partial<TaskState>)
+  ) => void,
+  id: string
+) {
+  const drop = (tasks: Task[]) => tasks.filter((task) => task.id !== id);
+  set((state) => ({
+    todayTasks: drop(state.todayTasks),
+    tomorrowTasks: drop(state.tomorrowTasks),
+    laterTasks: drop(state.laterTasks),
+    listTasks: drop(state.listTasks),
+    todayCompletedTasks: drop(state.todayCompletedTasks),
+    tomorrowCompletedTasks: drop(state.tomorrowCompletedTasks),
+    doneTasks: drop(state.doneTasks),
+    archivedTasks: drop(state.archivedTasks),
+  }));
+}
+
 function findTaskInState(state: TaskState, id: string): Task | undefined {
   return [
     ...state.todayTasks,
@@ -94,6 +115,8 @@ interface TaskState {
   archiveTask: (id: string) => Promise<void>;
   unarchiveTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  /** Hides the task at once and only deletes for real once the Undo toast closes. */
+  deleteTaskWithUndo: (id: string) => Promise<void>;
   setImportant: (id: string) => Promise<void>;
   toggleRecurring: (id: string) => Promise<void>;
   moveToTomorrow: (id: string) => Promise<void>;
@@ -411,6 +434,33 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const existing = await taskRepository.getById(id);
     await taskRepository.deletePermanent(id);
     await refreshAfterMutation(get, existing?.listId);
+  },
+
+  deleteTaskWithUndo: async (id) => {
+    const existing = findTaskInState(get(), id) ?? (await taskRepository.getById(id));
+    if (!existing) return;
+    // Drop the row from view right away, then soft-delete so any refresh
+    // during the Undo window (adding a task, switching tabs) keeps it hidden.
+    removeTaskFromState(set, id);
+    await taskRepository.softDelete(id);
+    const refreshViews = async () => {
+      await refreshAfterMutation(get, existing.listId);
+      await get().refreshDone();
+      await get().refreshArchived();
+    };
+    useToastStore.getState().show('Deleted', {
+      action: {
+        label: 'Undo',
+        onPress: async () => {
+          await taskRepository.restoreDeleted(id);
+          await refreshViews();
+        },
+      },
+      onExpire: async () => {
+        await taskRepository.deletePermanent(id);
+        await refreshViews();
+      },
+    });
   },
 
   setImportant: async (id) => {

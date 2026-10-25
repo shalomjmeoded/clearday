@@ -63,10 +63,10 @@ const styles = StyleSheet.create({
   subtitle: { textAlign: 'center' },
   action: {
     marginTop: spacing.lg,
-    minHeight: 40,
-    borderRadius: 20,
+    minHeight: 44,
+    borderRadius: 22,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.sm + 4,
     overflow: 'hidden',
     textAlign: 'center',
   },

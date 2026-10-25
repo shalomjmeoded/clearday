@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 
 import { getDb, closeDb } from '@/db/client';
-import { SCHEMA_VERSION } from '@/db/constants';
+import { INBOX_LIST_ID, SCHEMA_VERSION } from '@/db/constants';
 import {
   __isDbBusy,
   runExclusive,
@@ -2577,6 +2577,100 @@ async function main() {
     assert.equal(getIsPro(), true, 'a promotional grant without a product still unlocks');
     assert.equal(useProStore.getState().activeProductId, null);
     resetSvc();
+  });
+
+  // ---- undoable delete + toast expiry ------------------------------------
+  await test('delete with undo: hidden everywhere, reminder silenced, Undo brings it back', async () => {
+    await freshDb();
+    useToastStore.setState({ toast: null });
+    const task = await taskRepository.create({
+      title: 'oops, not that one',
+      reminderAt: FUTURE_DAY(1).toISOString(),
+    });
+    assert.equal(scheduled.size, 1);
+    await useTaskStore.getState().refreshAll();
+
+    await useTaskStore.getState().deleteTaskWithUndo(task.id);
+    assert.equal(useToastStore.getState().toast?.message, 'Deleted');
+    assert.equal(scheduled.size, 0, 'reminder cancelled while hidden');
+    assert.equal(await taskRepository.getById(task.id), null, 'hidden from lookups');
+    assert.equal((await taskRepository.getAllActive()).length, 0, 'hidden from lists');
+    // A refresh in the Undo window (e.g. after adding another task) must not resurrect it.
+    await useTaskStore.getState().refreshAll();
+    assert.equal(
+      useTaskStore.getState().todayTasks.some((t) => t.id === task.id),
+      false,
+      'refresh keeps it hidden'
+    );
+
+    await useToastStore.getState().toast!.action!.onPress();
+    const back = await taskRepository.getById(task.id);
+    assert.equal(back?.title, 'oops, not that one', 'Undo restores the row');
+    assert.equal(scheduled.size, 1, 'reminder rescheduled on Undo');
+  });
+
+  await test('delete with undo: letting the toast expire deletes for good', async () => {
+    await freshDb();
+    useToastStore.setState({ toast: null });
+    const task = await taskRepository.create({ title: 'gone for real' });
+    await useTaskStore.getState().deleteTaskWithUndo(task.id);
+    const toast = useToastStore.getState().toast!;
+    useToastStore.getState().dismiss(toast.id);
+    await toast.onExpire?.();
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ id: string }>(
+      'SELECT id FROM tasks WHERE id = ?',
+      [task.id]
+    );
+    assert.equal(row, null, 'row removed from the table');
+  });
+
+  await test('toast: a newer toast closes the previous Undo window', async () => {
+    useToastStore.setState({ toast: null });
+    let expired = 0;
+    useToastStore.getState().show('first', { onExpire: () => { expired++; } });
+    useToastStore.getState().show('second');
+    assert.equal(expired, 1, 'replacement runs onExpire of the replaced toast');
+    assert.equal(useToastStore.getState().toast?.message, 'second');
+  });
+
+  await test('toast: taking the action skips onExpire', async () => {
+    useToastStore.setState({ toast: null });
+    let expired = 0;
+    useToastStore.getState().show('undoable', {
+      action: { label: 'Undo', onPress: () => {} },
+      onExpire: () => { expired++; },
+    });
+    const id = useToastStore.getState().toast!.id;
+    useToastStore.getState().dismiss(id, { ranAction: true });
+    assert.equal(expired, 0, 'action dismissal does not expire');
+    assert.equal(useToastStore.getState().toast, null);
+  });
+
+  await test('countActiveByList: groups open tasks per list, ignores done and deleted', async () => {
+    await freshDb();
+    const work = await listRepository.create('Work');
+    await taskRepository.create({ title: 'a' });
+    await taskRepository.create({ title: 'b' });
+    await taskRepository.create({ title: 'c', listId: work.id });
+    const done = await taskRepository.create({ title: 'd', listId: work.id });
+    await taskRepository.complete(done.id);
+    const hidden = await taskRepository.create({ title: 'e' });
+    await taskRepository.softDelete(hidden.id);
+    const counts = await taskRepository.countActiveByList();
+    assert.equal(counts[INBOX_LIST_ID], 2);
+    assert.equal(counts[work.id], 1);
+  });
+
+  await test('purgeSoftDeleted: finishes interrupted deletes, keeps live rows', async () => {
+    await freshDb();
+    const keep = await taskRepository.create({ title: 'keep' });
+    const drop = await taskRepository.create({ title: 'drop' });
+    await taskRepository.softDelete(drop.id);
+    await taskRepository.purgeSoftDeleted();
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ id: string }>('SELECT id FROM tasks');
+    assert.deepEqual(rows.map((r) => r.id), [keep.id]);
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

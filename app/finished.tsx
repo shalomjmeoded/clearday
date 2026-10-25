@@ -25,7 +25,7 @@ export default function FinishedTasksScreen() {
   const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const unarchiveTask = useTaskStore((s) => s.unarchiveTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
-  const deleteTask = useTaskStore((s) => s.deleteTask);
+  const deleteTaskWithUndo = useTaskStore((s) => s.deleteTaskWithUndo);
   const setImportant = useTaskStore((s) => s.setImportant);
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const clearFinishedTasks = useTaskStore((s) => s.clearFinishedTasks);
@@ -125,16 +125,7 @@ export default function FinishedTasksScreen() {
               onArchive={() =>
                 section.archived ? unarchiveTask(item.id) : archiveTask(item.id)
               }
-              onDelete={() =>
-                Alert.alert('Delete task?', 'This cannot be undone.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => deleteTask(item.id),
-                  },
-                ])
-              }
+              onDelete={() => deleteTaskWithUndo(item.id)}
               onPin={() => setImportant(item.id)}
               onToggleRecurring={() => toggleRecurring(item.id)}
             />

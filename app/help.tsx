@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { FormScreen } from '@/components/layout/FormScreen';
 import {
@@ -32,9 +32,9 @@ const SECTIONS = [
       'A reminder carries two buttons. Complete ticks the task off without opening the app, and Snooze 1 Hour pushes it back. Tapping the notification itself opens the task.',
   },
   {
-    title: 'Pinning important tasks',
+    title: 'Pin and star',
     body:
-      'Tap the pin in quick add or set Must do today in task detail. Pinned tasks float near the top of Today and All.',
+      'Pin (the pin icon in quick add, or Must do today in task detail) floats a task to the top of Today. Star (swipe a row right) marks it important and gives it a ★. Two levels, two icons, used the same way everywhere.',
   },
   {
     title: 'Colors',
@@ -84,18 +84,16 @@ export default function HelpScreen() {
         }}
       />
       <FormScreen modalHeader>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {SECTIONS.map((section) => (
-            <View key={section.title} style={styles.section}>
-              <Text style={[typography.caption, styles.label, { color: tokens.mutedText }]}>
-                {section.title.toUpperCase()}
-              </Text>
-              <Text style={[typography.body, styles.body, { color: tokens.text }]}>
-                {section.body}
-              </Text>
-            </View>
-          ))}
-        </ScrollView>
+        {SECTIONS.map((section) => (
+          <View key={section.title} style={styles.section}>
+            <Text style={[typography.caption, styles.label, { color: tokens.mutedText }]}>
+              {section.title.toUpperCase()}
+            </Text>
+            <Text style={[typography.body, styles.body, { color: tokens.text }]}>
+              {section.body}
+            </Text>
+          </View>
+        ))}
       </FormScreen>
     </>
   );

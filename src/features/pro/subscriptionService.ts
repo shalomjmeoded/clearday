@@ -40,6 +40,9 @@ export type ProPackage = {
   title: string;
   description?: string;
   priceString: string;
+  /** Numeric price in `currencyCode`, when the store provides one. */
+  price?: number;
+  currencyCode?: string;
   productId: string;
   packageType?: string;
 };
@@ -220,6 +223,8 @@ function mapPackage(pkg: PurchasesPackage): ProPackage {
     title: pkg.product.title,
     description: pkg.product.description,
     priceString: pkg.product.priceString,
+    price: typeof pkg.product.price === 'number' ? pkg.product.price : undefined,
+    currencyCode: pkg.product.currencyCode || undefined,
     productId: pkg.product.identifier,
     packageType: pkg.packageType,
   };

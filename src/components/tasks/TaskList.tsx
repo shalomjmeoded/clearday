@@ -10,6 +10,7 @@ import { spacing } from '@/theme/spacing';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
+import { triggerLightHaptic } from '@/utils/haptics';
 import { mergeTasksPreservingOrder, taskSyncKey } from '@/utils/taskSyncKey';
 
 import { CompletedSection } from './CompletedSection';
@@ -71,7 +72,7 @@ export function TaskList({
   listNames,
   listColors,
   loading = false,
-  bottomInset = 0,
+  bottomInset,
   ListFooterExtra,
   onComplete,
   onUncomplete,
@@ -95,7 +96,6 @@ export function TaskList({
   const behavior = useSettingsStore((s) => s.settings.completedTaskBehavior);
   const [orderedTasks, setOrderedTasks] = useState(activeTasks);
   const [manualSortTasks, setManualSortTasks] = useState<Task[]>([]);
-  const [draggableListRevision, setDraggableListRevision] = useState(0);
   const prevReorderModeRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
   const onUncompleteRef = useRef(onUncomplete);
@@ -327,6 +327,8 @@ export function TaskList({
       if (from === to) {
         return;
       }
+      // Closes the gesture: a tick on pickup already exists, so land with one too.
+      void triggerLightHaptic();
 
       const nextIds = data.map((task) => task.id);
       setManualSortTasks((prev) => {
@@ -335,7 +337,6 @@ export function TaskList({
         }
         return data;
       });
-      setDraggableListRevision((revision) => revision + 1);
       // Persist each drop as it happens. Screens whose reorder mode is always
       // on (Today) would otherwise never write the new order.
       onReorderRef.current?.(nextIds);
@@ -371,7 +372,6 @@ export function TaskList({
     return (
       <View style={[styles.wrap, { backgroundColor: tokens.background }]}>
         <DraggableFlatList
-          key={`manual-sort-${draggableListRevision}`}
           data={draggableTasks}
           keyExtractor={(item) => item.id}
           style={{ flex: 1, backgroundColor: tokens.background }}

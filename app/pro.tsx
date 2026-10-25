@@ -26,6 +26,20 @@ const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
 const PRIVACY_POLICY_URL = 'https://clearday-seven.vercel.app/privacy';
 
+/** "≈ $1.67 / month" for the yearly plan; empty when the store gives no numeric price. */
+function formatPerMonth(price?: number, currencyCode?: string): string | undefined {
+  if (!price || !currencyCode) return undefined;
+  try {
+    const monthly = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currencyCode,
+    }).format(price / 12);
+    return `≈ ${monthly} / month`;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function ProScreen() {
   const { tokens } = useTheme();
   const isPro = useProStore((s) => s.isPro);
@@ -72,6 +86,10 @@ export default function ProScreen() {
     price: pkg.priceString,
     period: getPlanPeriod(pkg.productId),
     featured: pkg.productId === PRODUCT_IDS.yearly,
+    perMonth:
+      pkg.productId === PRODUCT_IDS.yearly
+        ? formatPerMonth(pkg.price, pkg.currencyCode)
+        : undefined,
   }));
 
   const handlePurchase = useCallback(async () => {
@@ -268,9 +286,18 @@ export default function ProScreen() {
                     },
                   ]}
                 >
-                  <Text style={[typography.body, { color: tokens.text, fontWeight: '600' }]}>
-                    {plan.label}
-                  </Text>
+                  <View style={styles.planHeader}>
+                    <Text style={[typography.body, { color: tokens.text, fontWeight: '600' }]}>
+                      {plan.label}
+                    </Text>
+                    {plan.featured ? (
+                      <View style={[styles.planBadge, { backgroundColor: tokens.accentSoft }]}>
+                        <Text style={[typography.caption, styles.planBadgeText, { color: tokens.accent }]}>
+                          Best value
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <Text
                     style={[
                       typography.body,
@@ -280,6 +307,11 @@ export default function ProScreen() {
                     {plan.price}
                     {plan.period}
                   </Text>
+                  {plan.perMonth ? (
+                    <Text style={[typography.meta, { color: tokens.mutedText, marginTop: 2 }]}>
+                      {plan.perMonth}
+                    </Text>
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -444,6 +476,18 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   plans: { gap: spacing.sm, marginBottom: spacing.lg },
+  planHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  planBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  planBadgeText: { fontSize: 11, lineHeight: 15, letterSpacing: 0.6 },
   plan: {
     padding: spacing.lg,
     borderRadius: radius.lg,

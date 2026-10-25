@@ -6,16 +6,24 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 export function ScreenHeader({
   title,
+  subtitle,
   right,
   style,
-}: ViewProps & { title: string; right?: React.ReactNode }) {
+}: ViewProps & { title: string; subtitle?: string; right?: React.ReactNode }) {
   const { tokens } = useTheme();
 
   return (
     <View style={[styles.wrap, style]}>
-      <Text style={[typography.screenTitle, { color: tokens.text }]}>
-        {title}
-      </Text>
+      <View style={styles.text}>
+        <Text style={[typography.screenTitle, { color: tokens.text }]}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={[typography.caption, styles.subtitle, { color: tokens.mutedText }]}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
       {right}
     </View>
   );
@@ -30,4 +38,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.lg,
   },
+  text: { flexShrink: 1, gap: spacing.xs },
+  subtitle: { textTransform: 'none', letterSpacing: 0 },
 });

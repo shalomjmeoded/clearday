@@ -1,11 +1,5 @@
 import { Platform, TextStyle } from 'react-native';
 
-const fontFamily = Platform.select({
-  ios: 'System',
-  android: 'sans-serif',
-  default: 'System',
-});
-
 const displayFamily = Platform.select({
   ios: 'AvenirNext-Regular',
   android: 'sans-serif',
@@ -15,9 +9,9 @@ const displayFamily = Platform.select({
 export const typography = {
   heroTitle: {
     fontFamily: displayFamily,
-    fontSize: 21,
-    lineHeight: 27,
-    fontWeight: '400' as TextStyle['fontWeight'],
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '600' as TextStyle['fontWeight'],
     letterSpacing: 0,
   },
   screenTitle: {
@@ -50,11 +44,18 @@ export const typography = {
   },
   caption: {
     fontFamily: displayFamily,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '400' as TextStyle['fontWeight'],
-    letterSpacing: 0,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500' as TextStyle['fontWeight'],
+    letterSpacing: 0.8,
     textTransform: 'uppercase' as TextStyle['textTransform'],
+  },
+  chip: {
+    fontFamily: displayFamily,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '500' as TextStyle['fontWeight'],
+    letterSpacing: 0,
   },
   body: {
     fontFamily: displayFamily,
@@ -69,14 +70,14 @@ export const typography = {
     fontWeight: '600' as TextStyle['fontWeight'],
   },
   empty: {
-    fontFamily,
+    fontFamily: displayFamily,
     fontSize: 20,
     lineHeight: 28,
     fontWeight: '400' as TextStyle['fontWeight'],
     letterSpacing: 0,
   },
   emptySub: {
-    fontFamily,
+    fontFamily: displayFamily,
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '400' as TextStyle['fontWeight'],

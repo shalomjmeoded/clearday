@@ -3,11 +3,12 @@ import { StyleSheet, TextInput, type StyleProp, type ViewStyle } from 'react-nat
 
 import type { QuickAddOptions } from '@/types/quickAdd';
 
+import { IDLE_ADD_BUTTON_CLEARANCE } from '@/constants/layout';
+
 import { BottomInputBar } from './BottomInputBar';
 import { BottomBarInsetProvider } from './BottomBarInsetContext';
 import { KeyboardDismissView } from './KeyboardDismissView';
 import { Screen } from './Screen';
-import { useScreenInsets } from './useScreenInsets';
 
 interface Props {
   children: React.ReactNode;
@@ -48,11 +49,12 @@ export function ScreenWithBottomBar({
   inputBarConcealed = false,
   dismissKeyboardOnBackdropPress = true,
 }: Props) {
-  const { listBottomInset } = useScreenInsets({
-    variant: aboveTabBar ? 'tab' : 'stack',
-    hasBottomBar: showInputBar && inputBarActive,
-    aboveTabBar,
-  });
+  // The active bar takes layout space of its own, so lists only need extra
+  // bottom padding when the floating add button overlays them instead.
+  const listBottomInset =
+    showInputBar && !inputBarActive && inactiveInputContent
+      ? IDLE_ADD_BUTTON_CLEARANCE
+      : 0;
 
   return (
     <Screen edges={['top']} style={[styles.screen, style]}>

@@ -292,6 +292,48 @@ export const taskRepository = {
     return rows.map(mapRowToTask);
   },
 
+  /**
+   * Hides the row behind the Undo toast: every query filters on deletedAt,
+   * so the task vanishes from all views at once but can still come back.
+   */
+  async softDelete(id: string): Promise<void> {
+    await cancelReminderForTask(id);
+    const db = await getDb();
+    const now = nowIso();
+    await db.runAsync(
+      'UPDATE tasks SET deletedAt = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
+      [now, now, id]
+    );
+  },
+
+  /** Reverses softDelete and puts a still-future reminder back on the clock. */
+  async restoreDeleted(id: string): Promise<Task | null> {
+    const db = await getDb();
+    await db.runAsync(
+      'UPDATE tasks SET deletedAt = NULL, updatedAt = ? WHERE id = ?',
+      [nowIso(), id]
+    );
+    const task = await this.getById(id);
+    if (task?.reminderAt && task.status === 'active') {
+      await scheduleReminderForTask(task);
+    }
+    return task;
+  },
+
+  /**
+   * Finishes deletes whose Undo window was cut short by the app closing.
+   * Only safe at launch, when no Undo toast can be pending.
+   */
+  async purgeSoftDeleted(): Promise<void> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ id: string }>(
+      'SELECT id FROM tasks WHERE deletedAt IS NOT NULL'
+    );
+    for (const row of rows) {
+      await this.deletePermanent(row.id);
+    }
+  },
+
   async deletePermanent(id: string): Promise<void> {
     await cancelReminderForTask(id);
     const db = await getDb();
@@ -372,6 +414,20 @@ export const taskRepository = {
         await this.deletePermanent(row.id);
       }
     });
+  },
+
+  async countActiveByList(): Promise<Record<string, number>> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ listId: string | null; count: number }>(
+      `SELECT listId, COUNT(*) as count FROM tasks
+       WHERE status = 'active' AND deletedAt IS NULL
+       GROUP BY listId`
+    );
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      counts[row.listId ?? INBOX_LIST_ID] = row.count;
+    }
+    return counts;
   },
 
   async getByListId(listId: string): Promise<Task[]> {

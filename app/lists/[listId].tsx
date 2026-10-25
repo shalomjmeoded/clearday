@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { Screen } from '@/components/layout/Screen';
@@ -8,12 +8,16 @@ import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { HeaderBackButton } from '@/components/navigation/HeaderBackButton';
 import { TaskList } from '@/components/tasks/TaskList';
 import { listRepository } from '@/features/lists/listRepository';
-import { spacing } from '@/theme/spacing';
+import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
-import type { QuickAddOptions } from '@/types/quickAdd';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
-import { triggerLightHaptic, triggerSuccessHaptic } from '@/utils/haptics';
+import {
+  triggerLightHaptic,
+  triggerSelectionHaptic,
+  triggerSuccessHaptic,
+} from '@/utils/haptics';
 import { paramString } from '@/utils/routeParams';
 
 export default function ListDetailScreen() {
@@ -24,31 +28,36 @@ export default function ListDetailScreen() {
   const [listName, setListName] = useState('');
   const [listColor, setListColor] = useState<string | undefined>();
   const [reorderMode, setReorderMode] = useState(false);
+  const defaultListId = useSettingsStore((s) => s.settings.defaultListId);
+  const setSetting = useSettingsStore((s) => s.setSetting);
+  const isTodayDefault = listId === defaultListId;
   const listTasks = useTaskStore((s) => s.listTasks);
   const refreshList = useTaskStore((s) => s.refreshList);
   const addTask = useTaskStore((s) => s.addTask);
   const completeTask = useTaskStore((s) => s.completeTask);
   const uncompleteTask = useTaskStore((s) => s.uncompleteTask);
   const archiveTask = useTaskStore((s) => s.archiveTask);
-  const deleteTask = useTaskStore((s) => s.deleteTask);
+  const deleteTaskWithUndo = useTaskStore((s) => s.deleteTaskWithUndo);
   const setImportant = useTaskStore((s) => s.setImportant);
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
   const reorderTasks = useTaskStore((s) => s.reorderTasks);
 
-  useEffect(() => {
-    if (!listId) return;
-    listRepository.getById(listId).then((list) => {
-      if (list) {
-        setListName(list.name);
-        setListColor(list.color);
-      }
-    });
-  }, [listId]);
-
+  // Re-read on focus so a rename or recolor from the edit screen shows up.
   useFocusEffect(
     useCallback(() => {
-      if (listId) refreshList(listId);
+      if (!listId) return;
+      refreshList(listId);
+      let cancelled = false;
+      listRepository.getById(listId).then((list) => {
+        if (list && !cancelled) {
+          setListName(list.name);
+          setListColor(list.color);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
     }, [listId, refreshList])
   );
 
@@ -62,6 +71,12 @@ export default function ListDetailScreen() {
     );
   }
 
+  const useForToday = async () => {
+    if (!listId || isTodayDefault) return;
+    await triggerSelectionHaptic();
+    await setSetting('defaultListId', listId);
+  };
+
   const header = (
     <View style={styles.header}>
       <HeaderBackButton tokens={tokens} />
@@ -71,29 +86,76 @@ export default function ListDetailScreen() {
         ) : null}
         <Text style={[typography.screenTitle, { color: tokens.text }]}>{listName}</Text>
       </View>
-      <Pressable
-        onPress={async () => {
-          await triggerLightHaptic();
-          setReorderMode((value) => !value);
-        }}
-        style={({ pressed }) => [
-          styles.orderButton,
-          {
-            backgroundColor: reorderMode ? tokens.accent : tokens.accentSoft,
-            borderColor: tokens.border,
-          },
-          pressed && { opacity: 0.75 },
-        ]}
-      >
-        <Text
-          style={[
-            typography.button,
-            { color: reorderMode ? tokens.onAccent : tokens.accent },
+      <View style={styles.actionsRow}>
+        <Pressable
+          onPress={useForToday}
+          accessibilityRole="button"
+          accessibilityLabel={
+            isTodayDefault ? 'Shown on Today' : 'Show this list on Today'
+          }
+          style={({ pressed }) => [
+            styles.actionPill,
+            {
+              backgroundColor: isTodayDefault ? tokens.accentSoft : 'transparent',
+              borderColor: isTodayDefault ? tokens.accent : tokens.border,
+            },
+            pressed && !isTodayDefault && { opacity: 0.75 },
           ]}
         >
-          Order
-        </Text>
-      </Pressable>
+          <Text
+            style={[
+              typography.button,
+              styles.actionLabel,
+              { color: isTodayDefault ? tokens.accent : tokens.mutedText },
+            ]}
+          >
+            {isTodayDefault ? 'On Today ✓' : 'Use for Today'}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={async () => {
+            await triggerLightHaptic();
+            setReorderMode((value) => !value);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Reorder tasks"
+          style={({ pressed }) => [
+            styles.actionPill,
+            {
+              backgroundColor: reorderMode ? tokens.accent : 'transparent',
+              borderColor: reorderMode ? tokens.accent : tokens.border,
+            },
+            pressed && { opacity: 0.75 },
+          ]}
+        >
+          <Text
+            style={[
+              typography.button,
+              styles.actionLabel,
+              { color: reorderMode ? tokens.onAccent : tokens.mutedText },
+            ]}
+          >
+            Order
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={async () => {
+            await triggerLightHaptic();
+            router.push(`/list/${listId}`);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Edit list name and color"
+          style={({ pressed }) => [
+            styles.actionPill,
+            { borderColor: tokens.border },
+            pressed && { opacity: 0.75 },
+          ]}
+        >
+          <Text style={[typography.button, styles.actionLabel, { color: tokens.mutedText }]}>
+            Edit
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -125,18 +187,9 @@ export default function ListDetailScreen() {
           await archiveTask(id);
         }}
         onMoveTomorrow={moveToTomorrow}
-        onDelete={(id) => {
-          Alert.alert('Delete task?', 'This cannot be undone.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: async () => {
-                await triggerLightHaptic();
-                await deleteTask(id);
-              },
-            },
-          ]);
+        onDelete={async (id) => {
+          await triggerLightHaptic();
+          await deleteTaskWithUndo(id);
         }}
         onSetImportant={setImportant}
         onToggleRecurring={toggleRecurring}
@@ -156,12 +209,16 @@ const styles = StyleSheet.create({
   },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   colorDot: { width: 12, height: 12, borderRadius: 6 },
-  orderButton: {
-    alignSelf: 'flex-start',
-    minHeight: 40,
-    borderRadius: 20,
+  actionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  actionPill: {
+    minHeight: 36,
+    borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
     justifyContent: 'center',
   },
+  actionLabel: { fontSize: 14 },
 });

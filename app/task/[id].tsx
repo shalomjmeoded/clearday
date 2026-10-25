@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
@@ -52,10 +53,15 @@ import {
 } from '@/utils/streaks';
 import { tomorrowIso } from '@/utils/scheduleDates';
 
-const PRIORITIES: { key: TaskPriority; label: string }[] = [
+const PRIORITIES: {
+  key: TaskPriority;
+  label: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+}[] = [
   { key: 'normal', label: 'Normal' },
-  { key: 'important', label: 'Important' },
-  { key: 'must_do_today', label: 'Must do today' },
+  // Same glyphs as the swipe actions and quick-add toolbar: star = important, pin = today.
+  { key: 'important', label: 'Important', icon: 'star-outline' },
+  { key: 'must_do_today', label: 'Must do today', icon: 'pin-outline' },
 ];
 
 export default function TaskDetailScreen() {
@@ -483,6 +489,7 @@ export default function TaskDetailScreen() {
               }}
               style={[
                 styles.chip,
+                styles.chipRow,
                 {
                   borderColor: tokens.border,
                   backgroundColor:
@@ -490,11 +497,18 @@ export default function TaskDetailScreen() {
                 },
               ]}
             >
+              {p.icon ? (
+                <Ionicons
+                  name={p.icon}
+                  size={14}
+                  color={priority === p.key ? tokens.onAccent : tokens.mutedText}
+                />
+              ) : null}
               <Text
-                style={{
-                  color: priority === p.key ? tokens.onAccent : tokens.text,
-                  fontSize: 14,
-                }}
+                style={[
+                  typography.chip,
+                  { color: priority === p.key ? tokens.onAccent : tokens.text },
+                ]}
               >
                 {p.label}
               </Text>
@@ -564,10 +578,10 @@ export default function TaskDetailScreen() {
               ]}
             >
               <Text
-                style={{
-                  color: listId === list.id ? tokens.onAccent : tokens.text,
-                  fontSize: 14,
-                }}
+                style={[
+                  typography.chip,
+                  { color: listId === list.id ? tokens.onAccent : tokens.text },
+                ]}
               >
                 {list.name}
               </Text>
@@ -590,20 +604,20 @@ export default function TaskDetailScreen() {
                 onPress={scheduleTomorrow}
                 style={[styles.chip, { borderColor: tokens.border, backgroundColor: tokens.card }]}
               >
-                <Text style={{ color: tokens.text, fontSize: 14 }}>Tomorrow</Text>
+                <Text style={[typography.chip, { color: tokens.text }]}>Tomorrow</Text>
               </Pressable>
               <Pressable
                 onPress={pickDate}
                 style={[styles.chip, { borderColor: tokens.accent, backgroundColor: tokens.card }]}
               >
-                <Text style={{ color: tokens.accent, fontSize: 14 }}>Choose date</Text>
+                <Text style={[typography.chip, { color: tokens.accent }]}>Choose date</Text>
               </Pressable>
               {dueDate && !isRecurring(recurrence) ? (
                 <Pressable
                   onPress={clearDueDate}
                   style={[styles.chip, { borderColor: tokens.border, backgroundColor: tokens.card }]}
                 >
-                  <Text style={{ color: tokens.mutedText, fontSize: 14 }}>Clear date</Text>
+                  <Text style={[typography.chip, { color: tokens.mutedText }]}>Clear date</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -622,7 +636,7 @@ export default function TaskDetailScreen() {
                     : formatTime(reminderAt)
                   : 'Set time'}
               </Text>
-              <Text style={[typography.meta, { color: tokens.mutedText }]}>›</Text>
+              <Ionicons name="chevron-forward" size={16} color={tokens.mutedText} />
             </Pressable>
             {reminderIsPast ? (
               <Text style={[typography.meta, styles.recurrenceHint, { color: tokens.danger }]}>
@@ -676,11 +690,13 @@ export default function TaskDetailScreen() {
                   ]}
                 >
                   <Text
-                    style={{
-                      color:
-                        recurrence === option.key ? tokens.onAccent : tokens.text,
-                      fontSize: 14,
-                    }}
+                    style={[
+                      typography.chip,
+                      {
+                        color:
+                          recurrence === option.key ? tokens.onAccent : tokens.text,
+                      },
+                    ]}
                   >
                     {option.label}
                   </Text>
@@ -788,6 +804,7 @@ const styles = StyleSheet.create({
   swatchSelected: {
     transform: [{ scale: 1.05 }],
   },
+  chipRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
   chip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,

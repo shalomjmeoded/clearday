@@ -1,7 +1,8 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import Animated, { FadeInDown, FadeInUp, FadeOut, FadeOutDown } from 'react-native-reanimated';
 
 import { CalendarDatePicker } from '@/components/tasks/CalendarDatePicker';
 import { QuickTimePicker } from '@/components/tasks/QuickTimePicker';
@@ -12,14 +13,16 @@ import {
   areLocalNotificationsSupported,
   requestReminderPermission,
 } from '@/features/reminders/reminderService';
+import { elevation } from '@/theme/elevation';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useProStore } from '@/store/proStore';
 import type { QuickAddOptions } from '@/types/quickAdd';
 import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
-import { isRecurring } from '@/utils/recurrence';
-import { todayRange, tomorrowRange } from '@/utils/dates';
+import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
+import { formatDisplayDate, formatTime, todayRange, tomorrowRange } from '@/utils/dates';
+import { parseTaskInput } from '@/utils/parseTaskInput';
 import { router } from 'expo-router';
 import { triggerLightHaptic, triggerSelectionHaptic } from '@/utils/haptics';
 
@@ -57,7 +60,6 @@ export function BottomInputBar({
   const { tokens } = useTheme();
   const { bottomSafe, tabBarHeight } = useScreenInsets({
     variant: aboveTabBar ? 'tab' : 'stack',
-    aboveTabBar,
   });
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
@@ -90,6 +92,28 @@ export function BottomInputBar({
     draftPinned ||
     isRecurring(draftRecurrence) ||
     Boolean(text.trim());
+
+  // Echo back what the typed text will turn into ("tomorrow 10am"), leaving
+  // out anything the toolbar has already pinned down, since that wins.
+  const parsedHint = useMemo(() => {
+    const trimmed = text.trim();
+    if (!trimmed) return '';
+    try {
+      const parsed = parseTaskInput(trimmed, { allowRecurrence: isPro });
+      const parts: string[] = [];
+      if (parsed.dueDate && !draftDueDate) parts.push(formatDisplayDate(parsed.dueDate));
+      if (parsed.reminderAt && !draftReminderAt) parts.push(formatTime(parsed.reminderAt));
+      if (parsed.recurrence && isRecurring(parsed.recurrence) && !isRecurring(draftRecurrence)) {
+        parts.push(formatRecurrenceLabel(parsed.recurrence));
+      }
+      if (parsed.priority === 'must_do_today' && !draftPinned) parts.push('Pinned to today');
+      else if (parsed.priority === 'important') parts.push('Starred');
+      if (parsed.listHint) parts.push(`List: ${parsed.listHint}`);
+      return parts.join(' · ');
+    } catch {
+      return '';
+    }
+  }, [text, isPro, draftDueDate, draftReminderAt, draftRecurrence, draftPinned]);
 
   const hasDraftContent =
     Boolean(text.trim()) ||
@@ -294,13 +318,25 @@ export function BottomInputBar({
     return inactiveContent ? <View style={inactiveStyle}>{inactiveContent}</View> : null;
   }
 
-  const bar = (
+  // When the keyboard opens it covers the tab bar, so the bar travels the
+  // extra tab-bar height to land right on top of the keyboard.
+  const openedOffset = aboveTabBar ? tabBarHeight + spacing.sm : spacing.sm;
+
+  return (
     <KeyboardStickyView
-      offset={{ closed: 0, opened: spacing.sm }}
+      offset={{ closed: 0, opened: openedOffset }}
       style={stickyStyle}
     >
+      <Animated.View
+        entering={FadeInUp.duration(200)}
+        exiting={FadeOutDown.duration(150)}
+      >
       {toolbarVisible ? (
-        <View style={styles.toolbar}>
+        <Animated.View
+          entering={FadeInDown.duration(160)}
+          exiting={FadeOut.duration(120)}
+          style={styles.toolbar}
+        >
           <ToolbarBtn
             icon="calendar-outline"
             active={draftDatePick === 'pick'}
@@ -314,7 +350,7 @@ export function BottomInputBar({
             tokens={tokens}
           />
           <ToolbarBtn
-            label="Tom."
+            label="Tmrw"
             active={draftDatePick === 'tomorrow'}
             onPress={setTomorrow}
             tokens={tokens}
@@ -344,7 +380,7 @@ export function BottomInputBar({
             tokens={tokens}
             colorDot={draftColor ?? undefined}
           />
-        </View>
+        </Animated.View>
       ) : null}
       <View
         style={[
@@ -391,7 +427,21 @@ export function BottomInputBar({
           }}
           blurOnSubmit={false}
         />
-        {toolbarVisible ? (
+        {text.trim() ? (
+          <Pressable
+            onPress={submit}
+            style={({ pressed }) => [
+              styles.dismissBtn,
+              { backgroundColor: tokens.accent },
+              pressed && { opacity: 0.8 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Add task"
+            hitSlop={8}
+          >
+            <Ionicons name="arrow-up" size={18} color={tokens.onAccent} />
+          </Pressable>
+        ) : toolbarVisible ? (
           <Pressable
             onPress={restoreInputVisible ? focusInput : () => dismissInput()}
             style={({ pressed }) => [
@@ -417,7 +467,12 @@ export function BottomInputBar({
         <Text style={[styles.hint, { color: tokens.mutedText }]}>
           Type something to add a task.
         </Text>
+      ) : parsedHint ? (
+        <Text style={[styles.hint, { color: tokens.accent }]} numberOfLines={1}>
+          {parsedHint}
+        </Text>
       ) : null}
+      </Animated.View>
 
       <CalendarDatePicker
         visible={showCalendar}
@@ -462,12 +517,6 @@ export function BottomInputBar({
       />
     </KeyboardStickyView>
   );
-
-  if (aboveTabBar) {
-    return <View style={{ marginBottom: tabBarHeight }}>{bar}</View>;
-  }
-
-  return bar;
 }
 
 function ToolbarBtn({
@@ -548,8 +597,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   toolBtn: {
-    minHeight: 30,
-    minWidth: 34,
+    minHeight: 34,
+    minWidth: 38,
     paddingHorizontal: spacing.xs + 2,
     borderRadius: radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
@@ -572,11 +621,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    ...elevation.floating,
   },
   draftColorMark: {
     width: 3,

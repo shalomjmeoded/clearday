@@ -7,6 +7,7 @@ import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatDisplayDate, formatTime } from '@/utils/dates';
 import {
   buildReminderIso,
@@ -32,6 +33,8 @@ interface Props {
 
 export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) {
   const { tokens } = useTheme();
+  // Keep the last row clear of the home indicator / gesture bar.
+  const sheetBottomPadding = Math.max(useSafeAreaInsets().bottom + spacing.sm, spacing.xl);
   const defaultReminderTime = useSettingsStore(
     (s) => s.settings.defaultReminderTime
   );
@@ -81,7 +84,7 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
       <Modal visible={visible && !showCustom} animationType="slide" transparent onRequestClose={onClose}>
         <Pressable style={styles.backdrop} onPress={onClose}>
           <Pressable
-            style={[styles.sheet, { backgroundColor: tokens.background }]}
+            style={[styles.sheet, { backgroundColor: tokens.background, paddingBottom: sheetBottomPadding }]}
             onPress={(e) => e.stopPropagation()}
           >
             <View style={[styles.handle, { backgroundColor: tokens.border }]} />
@@ -145,7 +148,6 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    paddingBottom: spacing.xl,
   },
   handle: {
     width: 36,

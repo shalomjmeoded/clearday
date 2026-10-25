@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 export const MIN_TOUCH_TARGET = 44;
 
 /** Icon + label row inside the tab bar (excludes safe-area padding). */
@@ -14,10 +12,7 @@ export function getTabBarHeight(bottomInset: number): number {
 }
 
 /**
- * Legacy fixed height without safe area — do not use for layout math.
- * @deprecated Use getTabBarHeight(insets.bottom) instead.
+ * Scroll clearance for the floating add button (52pt button + 24pt bottom
+ * offset + breathing room) so the last row can scroll above it.
  */
-export const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 88 : 64;
-
-/** Approximate height of BottomInputBar (padding + input). */
-export const BOTTOM_INPUT_BAR_HEIGHT = 76;
+export const IDLE_ADD_BUTTON_CLEARANCE = 88;

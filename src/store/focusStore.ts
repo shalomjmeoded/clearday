@@ -9,7 +9,7 @@ interface FocusState {
   exitFocus: () => void;
 }
 
-const MAX_FOCUS = 3;
+export const MAX_FOCUS = 3;
 
 export const useFocusStore = create<FocusState>((set, get) => ({
   selectedIds: [],

@@ -6,6 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   addMonths,
   eachDayOfInterval,
@@ -25,6 +26,7 @@ import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { triggerSelectionHaptic } from '@/utils/haptics';
 
 interface Props {
@@ -41,6 +43,8 @@ export function CalendarDatePicker({
   onSelect,
 }: Props) {
   const { tokens } = useTheme();
+  // Keep the last row clear of the home indicator / gesture bar.
+  const sheetBottomPadding = Math.max(useSafeAreaInsets().bottom + spacing.sm, spacing.xl);
   const initial = selectedDate ? startOfDay(new Date(selectedDate)) : startOfDay(new Date());
   const [viewMonth, setViewMonth] = useState(initial);
   const selected = selectedDate ? startOfDay(new Date(selectedDate)) : undefined;
@@ -79,19 +83,31 @@ export function CalendarDatePicker({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable
-          style={[styles.sheet, { backgroundColor: tokens.background }]}
+          style={[styles.sheet, { backgroundColor: tokens.background, paddingBottom: sheetBottomPadding }]}
           onPress={(e) => e.stopPropagation()}
         >
           <View style={[styles.handle, { backgroundColor: tokens.border }]} />
           <View style={styles.headerRow}>
-            <Pressable onPress={goPrev} hitSlop={12} style={styles.navBtn}>
-              <Text style={[typography.button, { color: tokens.accent }]}>‹</Text>
+            <Pressable
+              onPress={goPrev}
+              hitSlop={12}
+              style={styles.navBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Previous month"
+            >
+              <Ionicons name="chevron-back" size={20} color={tokens.accent} />
             </Pressable>
             <Text style={[typography.screenTitle, styles.monthTitle, { color: tokens.text }]}>
               {format(viewMonth, 'MMMM yyyy')}
             </Text>
-            <Pressable onPress={goNext} hitSlop={12} style={styles.navBtn}>
-              <Text style={[typography.button, { color: tokens.accent }]}>›</Text>
+            <Pressable
+              onPress={goNext}
+              hitSlop={12}
+              style={styles.navBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Next month"
+            >
+              <Ionicons name="chevron-forward" size={20} color={tokens.accent} />
             </Pressable>
           </View>
 
@@ -172,7 +188,6 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
   },
   handle: {
