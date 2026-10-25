@@ -21,7 +21,8 @@ import { useProStore } from '@/store/proStore';
 import type { QuickAddOptions } from '@/types/quickAdd';
 import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
-import { formatDisplayDate, formatTime, todayRange, tomorrowRange } from '@/utils/dates';
+import { formatDisplayDate, formatTime, todayDueIso } from '@/utils/dates';
+import { tomorrowIso } from '@/utils/scheduleDates';
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import { router } from 'expo-router';
 import { triggerLightHaptic, triggerSelectionHaptic } from '@/utils/haptics';
@@ -221,7 +222,7 @@ export function BottomInputBar({
       return;
     }
     setDraftDatePick('today');
-    setDraftDueDate(todayRange().start);
+    setDraftDueDate(todayDueIso());
     focusInput();
   };
 
@@ -234,7 +235,7 @@ export function BottomInputBar({
       return;
     }
     setDraftDatePick('tomorrow');
-    setDraftDueDate(tomorrowRange().start);
+    setDraftDueDate(tomorrowIso());
     focusInput();
   };
 

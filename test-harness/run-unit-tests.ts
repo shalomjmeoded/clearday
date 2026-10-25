@@ -16,7 +16,7 @@ import {
   whenDbIdle,
 } from '@/db/exclusive';
 import { initDatabase, __MIGRATIONS, PRE_MIGRATION_SNAPSHOT } from '@/db/migrations';
-import { fetchTodayTasks } from '@/features/tasks/taskQueries';
+import { fetchTodayTasks, fetchTomorrowTasks } from '@/features/tasks/taskQueries';
 import { checkIntegrity, getSnapshotInfo, restoreSnapshot } from '@/db/snapshot';
 import { mapRowToTask } from '@/features/tasks/taskMapper';
 import { listRepository } from '@/features/lists/listRepository';
@@ -53,8 +53,11 @@ import { useTaskStore } from '@/store/taskStore';
 import { useToastStore } from '@/store/toastStore';
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import { getNextDueDate, shiftReminderToDueDate } from '@/utils/recurrence';
+import { isOverdue, msUntilNextLocalMidnight, toDueDateIso } from '@/utils/dates';
+import { tomorrowIso } from '@/utils/scheduleDates';
 import {
   buildReminderIso,
+  effectiveReminderAt,
   formatTimeKeyLabel,
   isReminderOnDifferentDay,
   isReminderPast,
@@ -111,6 +114,22 @@ function timeOf(iso: string): string {
   return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+/**
+ * Runs `fn` with the process clock in another zone. Node re-reads TZ on
+ * change, and date-fns builds on the native Date, so everything under test
+ * follows. The machine's zone is restored afterwards.
+ */
+async function withTimeZone<T>(tz: string, fn: () => T | Promise<T>): Promise<T> {
+  const previous = process.env.TZ;
+  process.env.TZ = tz;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+}
+
 async function freshDb() {
   await closeDb();
   __resetNotifications();
@@ -165,12 +184,47 @@ async function main() {
     assert.equal(dayOf(leap), '2032-2-29');
   });
 
-  await test('daily across a DST change keeps local midnight', () => {
-    // US spring-forward 2026-03-08; stepping must land on local midnight.
+  await test('daily across a DST change keeps the calendar day, anchored at local noon', () => {
+    // US spring-forward 2026-03-08; stepping must land on the next calendar
+    // day at the canonical noon anchor, not 23 hours later.
     const next = getNextDueDate(local(2026, 3, 7).toISOString(), 'daily', local(2026, 3, 7));
     const date = new Date(next);
     assert.equal(dayOf(next), '2026-3-8');
-    assert.equal(date.getHours(), 0);
+    assert.equal(date.getHours(), 12);
+    // A midnight anchor written by an earlier build steps the same way.
+    assert.equal(next, getNextDueDate(local(2026, 3, 7, 12).toISOString(), 'daily', local(2026, 3, 7)));
+  });
+
+  await test('dates: toDueDateIso stores local noon and reads as the same day far to the west', async () => {
+    const stored = await withTimeZone('Europe/Berlin', () =>
+      toDueDateIso(new Date(2026, 9, 27, 8, 15))
+    );
+    for (const tz of ['Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Pacific/Honolulu', 'Asia/Tokyo']) {
+      await withTimeZone(tz, () => {
+        assert.equal(dayOf(stored), '2026-10-27', `still Oct 27 in ${tz}`);
+      });
+    }
+    // The old midnight anchor is what broke: one hour west and it is the 26th.
+    const midnight = await withTimeZone('Europe/Berlin', () =>
+      new Date(2026, 9, 27, 0, 0).toISOString()
+    );
+    await withTimeZone('America/New_York', () => {
+      assert.equal(dayOf(midnight), '2026-10-26', 'midnight anchor slips a day');
+    });
+  });
+
+  await test('dates: msUntilNextLocalMidnight lands on 00:00 of the next day across DST', async () => {
+    await withTimeZone('America/New_York', () => {
+      // 2026-11-01 is the 25-hour fall-back day; 2026-03-08 the 23-hour one.
+      for (const now of [local(2026, 11, 1, 0, 30), local(2026, 3, 8, 0, 30), local(2026, 10, 25, 23, 0)]) {
+        const fire = new Date(now.getTime() + msUntilNextLocalMidnight(now));
+        assert.equal(fire.getDate(), now.getDate() + 1);
+        assert.equal(fire.getHours(), 0);
+        assert.equal(fire.getMinutes(), 0);
+        assert.equal(fire.getSeconds(), 1, 'one-second cushion past the boundary');
+      }
+      assert.equal(msUntilNextLocalMidnight(local(2026, 11, 1, 0, 30)), 24.5 * 3600_000 + 1000);
+    });
   });
 
   await test('none returns anchor unchanged', () => {
@@ -192,6 +246,25 @@ async function main() {
     const now = local(2026, 10, 23, 10);
     const iso = buildReminderIso(8, 0, undefined, now);
     assert.equal(dayOf(iso), '2026-10-24');
+  });
+
+  await test('buildReminderIso: rolling to tomorrow on the fall-back day is a calendar step', async () => {
+    await withTimeZone('America/New_York', () => {
+      // 00:40 on 2026-11-01, a 25-hour day. "+24h" is still Nov 1, so the
+      // reminder used to land in the past and was never scheduled.
+      const now = local(2026, 11, 1, 0, 40);
+      const iso = buildReminderIso(0, 30, undefined, now);
+      assert.equal(dayOf(iso), '2026-11-2');
+      assert.equal(timeOf(iso), '0:30');
+      assert.equal(isReminderPast(iso, now), false);
+    });
+  });
+
+  await test('parser: due dates come out at the noon anchor', () => {
+    const now = local(2026, 10, 23, 10);
+    assert.equal(new Date(parseTaskInput('tomorrow', { now }).dueDate!).getHours(), 12);
+    assert.equal(new Date(parseTaskInput('call Bob 8am', { now }).dueDate!).getHours(), 12);
+    assert.equal(timeOf(parseTaskInput('call Bob 8am', { now }).reminderAt!), '8:00');
   });
 
   await test('buildReminderIso: explicit due date stays even if passed', () => {
@@ -1173,6 +1246,58 @@ async function main() {
     assert.ok(legacyIdx.some((i) => i.name === indexName));
   });
 
+  await test('migration: v8 adds snoozedUntil; v9 re-anchors due dates to local noon', async () => {
+    const db = await seedFirstReleaseDb();
+    // Legacy rows: a midnight anchor as earlier builds wrote it, and a
+    // damaged value that must be left alone rather than crash the upgrade.
+    const midnight = local(2026, 10, 27).toISOString();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO tasks (id, title, status, priority, dueDate, recurrence, listId, sortOrder, createdAt, updatedAt)
+       VALUES ('legacy-due', 'Legacy', 'active', 'normal', ?, 'none', 'inbox', 0, ?, ?),
+              ('broken-due', 'Broken', 'active', 'normal', 'not-a-date', 'none', 'inbox', 0, ?, ?)`,
+      [midnight, now, now, now, now]
+    );
+    await initDatabase();
+
+    const cols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(tasks)');
+    assert.ok(cols.some((c) => c.name === 'snoozedUntil'), 'column added');
+
+    const legacy = await taskRepository.getById('legacy-due');
+    assert.equal(dayOf(legacy!.dueDate!), '2026-10-27', 'same day');
+    assert.equal(new Date(legacy!.dueDate!).getHours(), 12, 'now at noon');
+    assert.equal(legacy!.dueDate, toDueDateIso(new Date(midnight)));
+    const broken = await db.getFirstAsync<{ dueDate: string }>(
+      "SELECT dueDate FROM tasks WHERE id = 'broken-due'"
+    );
+    assert.equal(broken!.dueDate, 'not-a-date', 'unparseable value untouched');
+    const t1 = await taskRepository.getById('t1');
+    assert.equal(t1!.dueDate, toDueDateIso(new Date('2025-02-01T09:00:00.000Z')));
+
+    // Re-running the step is a no-op.
+    const before = await db.getAllAsync<{ id: string; dueDate: string }>('SELECT id, dueDate FROM tasks ORDER BY id');
+    await __MIGRATIONS.find((m) => m.version === 9)!.run(db);
+    const after = await db.getAllAsync<{ id: string; dueDate: string }>('SELECT id, dueDate FROM tasks ORDER BY id');
+    assert.deepEqual(after, before);
+  });
+
+  await test('today: legacy midnight and noon due dates sort into the same day', async () => {
+    await freshDb();
+    const legacyToday = await taskRepository.create({ title: 'old style', dueDate: startOfLocalDay(new Date()) });
+    const noonToday = await taskRepository.create({ title: 'new style', dueDate: toDueDateIso(new Date()) });
+    const noonTomorrow = await taskRepository.create({ title: 'tomorrow', dueDate: tomorrowIso() });
+    const legacyYesterday = startOfLocalDay(FUTURE_DAY(-1));
+    const late = await taskRepository.create({ title: 'late', dueDate: legacyYesterday });
+
+    const todayIds = (await fetchTodayTasks()).map((t) => t.id);
+    assert.ok(todayIds.includes(legacyToday.id) && todayIds.includes(noonToday.id));
+    assert.ok(todayIds.includes(late.id), 'overdue');
+    assert.ok(!todayIds.includes(noonTomorrow.id));
+    assert.deepEqual((await fetchTomorrowTasks()).map((t) => t.id), [noonTomorrow.id]);
+    assert.equal(isOverdue(toDueDateIso(FUTURE_DAY(-1))), true);
+    assert.equal(isOverdue(toDueDateIso(new Date())), false);
+  });
+
   // ---- end-to-end edge cases ---------------------------------------------------
   await test('edge: a repeat overdue by months catches up once and logs the missed date', async () => {
     await freshDb();
@@ -1432,7 +1557,106 @@ async function main() {
     assert.equal(scheduled.size, 1, 'one pending alert');
     assert.equal(cancelled.length, 1, 'old alert replaced');
     const stored = await taskRepository.getById(task.id);
-    assert.equal(stored!.reminderAt, until);
+    assert.equal(stored!.reminderAt, task.reminderAt, 'chosen time untouched');
+    assert.equal(stored!.snoozedUntil, until);
+    assert.equal(effectiveReminderAt(stored!), until);
+    assert.equal([...scheduled.values()][0].date.toISOString(), until, 'alert rings at the snoozed moment');
+  });
+
+  await test('actions: snoozing a repeat does not move its time on the next date', async () => {
+    await freshDb();
+    const due = tomorrowIso();
+    const nine = FUTURE_DAY(1, 9).toISOString();
+    const task = await taskRepository.create({
+      title: 'Meds',
+      recurrence: 'daily',
+      dueDate: due,
+      reminderAt: nine,
+    });
+    const until = await snoozeReminder(task.id);
+    assert.ok(until);
+    const { task: advanced } = await taskRepository.complete(task.id);
+    assert.equal(timeOf(advanced!.reminderAt!), '9:00', 'still a 9:00 reminder');
+    assert.equal(dayOf(advanced!.reminderAt!), dayOf(advanced!.dueDate!));
+    assert.equal(advanced!.snoozedUntil, undefined, 'snooze did not outlive its occurrence');
+    assert.equal(
+      [...scheduled.values()][0].date.toISOString(),
+      advanced!.reminderAt,
+      'next alert is the 9:00 one'
+    );
+  });
+
+  await test('actions: a snooze is dropped when the reminder or day changes, kept on other edits', async () => {
+    await freshDb();
+    const task = await taskRepository.create({
+      title: 'Call',
+      dueDate: tomorrowIso(),
+      reminderAt: FUTURE_DAY(1, 9).toISOString(),
+    });
+    const until = await snoozeReminder(task.id);
+    const renamed = await taskRepository.update(task.id, { title: 'Call Sam' });
+    assert.equal(renamed!.snoozedUntil, until, 'an unrelated edit keeps the snooze');
+    assert.equal([...scheduled.values()][0].date.toISOString(), until);
+
+    const retimed = await taskRepository.update(task.id, { reminderAt: FUTURE_DAY(1, 15).toISOString() });
+    assert.equal(retimed!.snoozedUntil, undefined, 'a new time replaces the snooze');
+    assert.equal([...scheduled.values()][0].date.toISOString(), retimed!.reminderAt);
+
+    await snoozeReminder(task.id);
+    const moved = await taskRepository.scheduleForDate(task.id, toDueDateIso(FUTURE_DAY(3)));
+    assert.equal(moved!.snoozedUntil, undefined, 'a new day replaces the snooze');
+    assert.equal(timeOf(moved!.reminderAt!), '15:00', 'reminder followed the day at its chosen time');
+  });
+
+  await test('store: undoing an archive or a repeat completion brings a live snooze back', async () => {
+    await freshDb();
+    const plain = await taskRepository.create({
+      title: 'Plain',
+      reminderAt: FUTURE_DAY(1).toISOString(),
+    });
+    const until = await snoozeReminder(plain.id);
+    await useTaskStore.getState().archiveTask(plain.id);
+    assert.equal(scheduled.size, 0, 'archive silences the alert');
+    await useToastStore.getState().toast!.action!.onPress();
+    await new Promise((r) => setTimeout(r, 50));
+    const back = await taskRepository.getById(plain.id);
+    assert.equal(back!.status, 'active');
+    assert.equal(back!.snoozedUntil, until, 'snooze restored with the reminder');
+    assert.equal([...scheduled.values()].at(-1)!.date.toISOString(), until);
+
+    const repeat = await taskRepository.create({
+      title: 'Repeat',
+      recurrence: 'daily',
+      dueDate: tomorrowIso(),
+      reminderAt: FUTURE_DAY(1, 9).toISOString(),
+    });
+    const repeatUntil = await snoozeReminder(repeat.id);
+    await useTaskStore.getState().completeTask(repeat.id);
+    await new Promise((r) => setTimeout(r, 300));
+    await useToastStore.getState().toast!.action!.onPress();
+    await new Promise((r) => setTimeout(r, 50));
+    const restored = await taskRepository.getById(repeat.id);
+    assert.equal(restored!.dueDate, repeat.dueDate);
+    assert.equal(restored!.snoozedUntil, repeatUntil);
+  });
+
+  await test('sync: a snoozed alert is left where it is', async () => {
+    await freshDb();
+    const task = await taskRepository.create({
+      title: 'Snoozed',
+      reminderAt: FUTURE_DAY(1).toISOString(),
+    });
+    const until = await snoozeReminder(task.id);
+    const result = await syncScheduledReminders();
+    assert.deepEqual(result, { scheduled: 0, cleared: 0, skipped: 0 }, 'nothing to redo');
+    assert.equal([...scheduled.values()][0].date.toISOString(), until);
+    // A passed reminder with a live snooze is still a pending alert, not an orphan.
+    const db = await getDb();
+    const past = new Date(Date.now() - 3600_000).toISOString();
+    await db.runAsync('UPDATE tasks SET reminderAt = ? WHERE id = ?', [past, task.id]);
+    const again = await syncScheduledReminders();
+    assert.equal(again.cleared, 0);
+    assert.equal(scheduled.size, 1);
   });
 
   await test('actions: snooze ignores a task that is no longer active', async () => {
@@ -2671,6 +2895,168 @@ async function main() {
     const db = await getDb();
     const rows = await db.getAllAsync<{ id: string }>('SELECT id FROM tasks');
     assert.deepEqual(rows.map((r) => r.id), [keep.id]);
+  });
+
+  // ---- final round: follow-ups and edge cases ---------------------------------
+  await test('pin: "!!" and "p1" quick-add stay pinned and land on today; a pin on another day yields', async () => {
+    await freshDb();
+    setPro(true);
+    const bang = await useTaskStore.getState().addTask('!! buy milk');
+    assert.equal(bang!.priority, 'must_do_today');
+    assert.equal(dayOf(bang!.dueDate!), dayOf(new Date().toISOString()));
+    assert.equal(new Date(bang!.dueDate!).getHours(), 12, 'noon anchor');
+    const p1 = await useTaskStore.getState().addTask('p1 call mom');
+    assert.equal(p1!.priority, 'must_do_today');
+    const later = await useTaskStore.getState().addTask('!! buy milk tomorrow');
+    assert.equal(later!.priority, 'normal', 'the typed day wins over the pin');
+    assert.equal(dayOf(later!.dueDate!), dayOf(FUTURE_DAY(1).toISOString()));
+    assert.ok((await fetchTodayTasks()).some((t) => t.id === bang!.id));
+  });
+
+  await test('pin: the toolbar pin and setPriority without a date get today', async () => {
+    await freshDb();
+    const pinned = await useTaskStore.getState().addTask('buy milk', INBOX_LIST_ID, { priority: 'must_do_today' });
+    assert.equal(pinned!.priority, 'must_do_today');
+    assert.equal(dayOf(pinned!.dueDate!), dayOf(new Date().toISOString()));
+    const plain = await taskRepository.create({ title: 'later pin' });
+    assert.equal(plain.dueDate, undefined);
+    const promoted = await taskRepository.setPriority(plain.id, 'must_do_today');
+    assert.equal(dayOf(promoted!.dueDate!), dayOf(new Date().toISOString()));
+    // A dated task keeps its own date; the detail screen handles the pull-to-today.
+    const dated = await taskRepository.create({ title: 'dated', dueDate: tomorrowIso() });
+    const kept = await taskRepository.setPriority(dated.id, 'must_do_today');
+    assert.equal(kept!.dueDate, dated.dueDate);
+  });
+
+  await test('archive: keeps the reminder; unarchive reschedules a future one, leaves a past one quiet', async () => {
+    await freshDb();
+    const future = await taskRepository.create({ title: 'Soon', reminderAt: FUTURE_DAY(1).toISOString() });
+    assert.equal(scheduled.size, 1);
+    const archived = await taskRepository.archive(future.id);
+    assert.equal(archived!.reminderAt, future.reminderAt, 'reminder kept as data');
+    assert.equal(scheduled.size, 0, 'alert cancelled while archived');
+    const back = await taskRepository.unarchive(future.id);
+    assert.equal(back!.status, 'active');
+    assert.equal(scheduled.size, 1, 'alert back on the clock');
+    assert.equal([...scheduled.values()][0].date.toISOString(), future.reminderAt);
+
+    const past = new Date(Date.now() - 3600_000).toISOString();
+    const stale = await taskRepository.create({ title: 'Missed', reminderAt: past });
+    await taskRepository.archive(stale.id);
+    await taskRepository.unarchive(stale.id);
+    assert.equal(scheduled.size, 1, 'a passed reminder is not revived');
+    assert.equal((await taskRepository.getById(stale.id))!.reminderAt, past, 'but is still shown');
+  });
+
+  await test('snooze: a second snooze replaces the first; nothing to push means no snooze', async () => {
+    await freshDb();
+    const task = await taskRepository.create({ title: 'Twice', reminderAt: FUTURE_DAY(1).toISOString() });
+    const first = await snoozeReminder(task.id);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await snoozeReminder(task.id);
+    assert.ok(first && second && second > first);
+    assert.equal(scheduled.size, 1, 'one pending alert, not two');
+    assert.equal([...scheduled.values()][0].date.toISOString(), second);
+    assert.equal((await taskRepository.getById(task.id))!.snoozedUntil, second);
+
+    const quiet = await taskRepository.create({ title: 'No alarm' });
+    assert.equal(await snoozeReminder(quiet.id), null);
+    assert.equal((await taskRepository.getById(quiet.id))!.snoozedUntil, undefined);
+  });
+
+  await test('delete with undo: a snoozed alert comes back at its snoozed time', async () => {
+    await freshDb();
+    useToastStore.setState({ toast: null });
+    const task = await taskRepository.create({ title: 'Snoozed then deleted', reminderAt: FUTURE_DAY(1).toISOString() });
+    const until = await snoozeReminder(task.id);
+    await useTaskStore.getState().deleteTaskWithUndo(task.id);
+    assert.equal(scheduled.size, 0);
+    await useToastStore.getState().toast!.action!.onPress();
+    assert.equal(scheduled.size, 1);
+    assert.equal([...scheduled.values()][0].date.toISOString(), until);
+  });
+
+  await test('edge: completing a snoozed task and reopening it keeps the snoozed alert while it is still ahead', async () => {
+    await freshDb();
+    const task = await taskRepository.create({ title: 'Oops', reminderAt: FUTURE_DAY(1).toISOString() });
+    const until = await snoozeReminder(task.id);
+    await taskRepository.complete(task.id);
+    assert.equal(scheduled.size, 0, 'done: nothing pending');
+    const reopened = await taskRepository.uncomplete(task.id);
+    assert.equal(reopened!.snoozedUntil, until);
+    assert.equal([...scheduled.values()][0].date.toISOString(), until);
+  });
+
+  await test('backup: snoozedUntil round-trips and the restored alert rings at the snoozed time', async () => {
+    await freshDb();
+    const task = await taskRepository.create({ title: 'Portable snooze', reminderAt: FUTURE_DAY(1).toISOString() });
+    const until = await snoozeReminder(task.id);
+    const backup = await buildBackup();
+    assert.equal(backup.tasks.find((t) => t.id === task.id)!.snoozedUntil, until, 'exported');
+
+    await freshDb();
+    const path = join(cacheDirectory, `snooze-${Math.random()}.clearday`);
+    await writeFile(path, JSON.stringify(backup), 'utf8');
+    __setPickerResult({ canceled: false, assets: [{ uri: path }] });
+    assert.equal(await importBackupFromFile(), true);
+    const imported = await taskRepository.getById(task.id);
+    assert.equal(imported!.snoozedUntil, until);
+    assert.equal(imported!.reminderAt, task.reminderAt);
+    assert.equal([...scheduled.values()][0].date.toISOString(), until, 'restored alert honours the snooze');
+
+    // An older backup, written before the column existed, imports cleanly.
+    const legacy = { ...backup, tasks: backup.tasks.map(({ snoozedUntil: _drop, ...rest }) => rest) };
+    await freshDb();
+    const legacyPath = join(cacheDirectory, `legacy-${Math.random()}.clearday`);
+    await writeFile(legacyPath, JSON.stringify(legacy), 'utf8');
+    __setPickerResult({ canceled: false, assets: [{ uri: legacyPath }] });
+    assert.equal(await importBackupFromFile(), true);
+    assert.equal((await taskRepository.getById(task.id))!.snoozedUntil, undefined);
+    assert.equal([...scheduled.values()][0].date.toISOString(), task.reminderAt);
+  });
+
+  await test('parser: tonight, weekdays and "inNd" all produce noon due dates', () => {
+    const now = local(2026, 10, 23, 10); // a Friday
+    for (const raw of ['tonight', 'monday', 'in2d', 'in1w', 'tomorrow 7am', '!! now-ish']) {
+      const parsed = parseTaskInput(raw, { now });
+      assert.ok(parsed.dueDate, `${raw} has a due date`);
+      assert.equal(new Date(parsed.dueDate!).getHours(), 12, `${raw} at noon`);
+    }
+    const tonight = parseTaskInput('tonight', { now });
+    assert.equal(timeOf(tonight.reminderAt!), '20:00');
+    assert.equal(dayOf(tonight.dueDate!), '2026-10-23');
+    assert.equal(dayOf(parseTaskInput('monday', { now }).dueDate!), '2026-10-26');
+  });
+
+  await test('recurrence: a noon anchor steps like a midnight one, including month-end clamps', () => {
+    const jan31noon = toDueDateIso(local(2026, 1, 31));
+    const next = getNextDueDate(jan31noon, 'monthly', local(2026, 1, 31));
+    assert.equal(dayOf(next), '2026-2-28');
+    // Note: each completion re-anchors on the current due date, so across
+    // completions Jan 31 → Feb 28 → Mar 28. Keeping the 31st needs the
+    // original anchor stored on the task; tracked as a follow-up.
+    assert.equal(dayOf(getNextDueDate(next, 'monthly', local(2026, 2, 28))), '2026-3-28');
+    const weeklyNoon = getNextDueDate(toDueDateIso(local(2026, 10, 1)), 'weekly', local(2026, 10, 20));
+    const weeklyMidnight = getNextDueDate(local(2026, 10, 1).toISOString(), 'weekly', local(2026, 10, 20));
+    assert.equal(weeklyNoon, weeklyMidnight);
+    assert.equal(dayOf(weeklyNoon), '2026-10-22');
+  });
+
+  await test('dates: known limit — a zone jump of more than 12 hours still moves the day', async () => {
+    const stored = await withTimeZone('Pacific/Auckland', () => toDueDateIso(new Date(2026, 9, 27)));
+    await withTimeZone('America/Los_Angeles', () => {
+      // Auckland noon is 16:00 the previous day in Los Angeles (20 hours apart).
+      assert.equal(dayOf(stored), '2026-10-26');
+    });
+    await withTimeZone('Asia/Tokyo', () => {
+      assert.equal(dayOf(stored), '2026-10-27', 'within twelve hours it holds');
+    });
+  });
+
+  await test('dates: midnight timer from exactly 00:00 waits a full day; from 23:59:59 waits a second', () => {
+    assert.equal(msUntilNextLocalMidnight(local(2026, 10, 25, 0, 0)), 24 * 3600_000 + 1000);
+    const almost = new Date(2026, 9, 25, 23, 59, 59, 0);
+    assert.equal(msUntilNextLocalMidnight(almost), 2000);
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

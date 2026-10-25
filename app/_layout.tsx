@@ -23,6 +23,7 @@ import {
 import { useProStore } from '@/store/proStore';
 import { buildNavigationTheme } from '@/theme/navigationTheme';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
+import { msUntilNextLocalMidnight } from '@/utils/dates';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -150,22 +151,57 @@ export default function RootLayout() {
     bootstrap();
   }, []);
 
+  // "Today" is decided at query time, so the lists have to be re-read when
+  // the calendar day changes underneath a running app: coming back to the
+  // foreground after midnight, or simply sitting open across it. JS timers
+  // do not run while iOS has the app suspended, so the timer is re-armed on
+  // every foreground and the foreground refresh covers the gap.
+  const readyRef = useRef(false);
   useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
+
+  useEffect(() => {
+    const native = Platform.OS !== 'web';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+
+    const refreshTasks = () =>
+      import('@/store/taskStore').then(({ useTaskStore }) =>
+        useTaskStore.getState().refreshAll()
+      );
+
+    const armMidnightTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (disposed) return;
+        if (readyRef.current) void refreshTasks();
+        armMidnightTimer();
+      }, msUntilNextLocalMidnight());
+    };
+    if (native) armMidnightTimer();
+
     const subscription = AppState.addEventListener('change', (nextState) => {
       const wasBackground = appState.current.match(/inactive|background/);
       appState.current = nextState;
 
       if (wasBackground && nextState === 'active') {
         void useProStore.getState().recoverOnForeground();
-        if (Platform.OS !== 'web') {
+        if (native) {
           void import('@/features/reminders/reminderService').then(
             ({ syncScheduledReminders }) => syncScheduledReminders()
           );
+          if (readyRef.current) void refreshTasks();
+          armMidnightTimer();
         }
       }
     });
 
-    return () => subscription.remove();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      subscription.remove();
+    };
   }, []);
 
   // Tapping a reminder opens its task; also covers the notification that cold-started the app.

@@ -14,6 +14,7 @@ import {
 
 import type { TaskPriority } from '@/types/task';
 import type { TaskRecurrence } from '@/types/recurrence';
+import { toDueDateIso } from '@/utils/dates';
 
 export interface ParsedTaskInput {
   title: string;
@@ -219,7 +220,7 @@ export function parseTaskInput(
   return {
     title: kept.join(' ').trim() || raw.trim(),
     priority,
-    dueDate: dueDate?.toISOString(),
+    dueDate: dueDate ? toDueDateIso(dueDate) : undefined,
     reminderAt: reminderAt?.toISOString(),
     listHint,
     recurrence,

@@ -1,4 +1,5 @@
 import {
+  addDays,
   format,
   isSameDay,
   parseISO,
@@ -55,12 +56,25 @@ export function buildReminderIso(
   const base = dueDateIso ? startOfDay(parseISO(dueDateIso)) : startOfDay(now);
   let date = setMinutes(setHours(base, hours), minutes);
   if (!dueDateIso && date.getTime() <= now.getTime()) {
-    date = setMinutes(
-      setHours(startOfDay(new Date(now.getTime() + 86400000)), hours),
-      minutes
-    );
+    // A calendar step, not +24h: on the 25-hour day when clocks fall back,
+    // 24 hours after an early-morning "now" is still the same date, and the
+    // reminder would be built in the past and silently never scheduled.
+    date = setMinutes(setHours(addDays(startOfDay(now), 1), hours), minutes);
   }
   return date.toISOString();
+}
+
+/**
+ * When the next alert actually fires. A snooze is a one-off override that
+ * leaves the chosen reminder time alone, so a repeating "9:00" stays "9:00"
+ * on its next date even after being pushed out an hour today.
+ */
+export function effectiveReminderAt(task: {
+  reminderAt?: string;
+  snoozedUntil?: string;
+}): string | undefined {
+  if (!task.reminderAt) return undefined;
+  return task.snoozedUntil ?? task.reminderAt;
 }
 
 /** True when the reminder moment has already passed (nothing will fire). */

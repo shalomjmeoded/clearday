@@ -23,6 +23,7 @@ import {
 } from 'date-fns';
 
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
+import { toDueDateIso } from '@/utils/dates';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -65,7 +66,7 @@ export function CalendarDatePicker({
 
   const pickDay = async (day: Date) => {
     await triggerSelectionHaptic();
-    onSelect(startOfDay(day).toISOString());
+    onSelect(toDueDateIso(day));
     onClose();
   };
 

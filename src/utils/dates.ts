@@ -6,6 +6,7 @@ import {
   isBefore,
   isSameDay,
   parseISO,
+  setHours,
   startOfDay,
 } from 'date-fns';
 
@@ -13,18 +14,35 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-export function todayRange(): { start: string; end: string } {
-  const start = startOfDay(new Date());
-  const end = endOfDay(new Date());
-  return { start: start.toISOString(), end: end.toISOString() };
+/**
+ * Due dates are calendar days, not moments, but they travel as ISO instants.
+ * Every writer goes through here so the instant always sits at local *noon*
+ * of the intended day. Noon rather than midnight because the row is read
+ * back in whatever zone the device is in later: a midnight anchor crosses
+ * into the previous day as soon as the user (or a restored backup) moves
+ * one hour west, while noon tolerates a shift of up to twelve hours either
+ * way. Readers only ever ask "which local day is this?" (isSameDay,
+ * isToday, startOfDay), so rows written at midnight by earlier builds keep
+ * working unchanged.
+ */
+export function toDueDateIso(day: Date): string {
+  return setHours(startOfDay(day), 12).toISOString();
 }
 
-export function tomorrowRange(): { start: string; end: string } {
-  const day = addDays(startOfDay(new Date()), 1);
-  return {
-    start: day.toISOString(),
-    end: endOfDay(day).toISOString(),
-  };
+/** Today as a due date. */
+export function todayDueIso(now: Date = new Date()): string {
+  return toDueDateIso(now);
+}
+
+/**
+ * Milliseconds until the next local midnight. Computed on calendar fields so
+ * a 23- or 25-hour DST day still lands on 00:00 rather than 23:00 or 01:00.
+ * A small cushion keeps the callback on the right side of the boundary when
+ * timers fire a few milliseconds early.
+ */
+export function msUntilNextLocalMidnight(now: Date = new Date()): number {
+  const next = addDays(startOfDay(now), 1);
+  return Math.max(0, next.getTime() - now.getTime()) + 1000;
 }
 
 export function isToday(iso?: string): boolean {

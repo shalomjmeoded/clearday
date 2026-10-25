@@ -20,6 +20,7 @@ import { formatDisplayDate, formatTime, isToday } from '@/utils/dates';
 import { formatTaskSideDate } from '@/utils/formatTaskSideDate';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
 import {
+  effectiveReminderAt,
   isReminderOnDifferentDay,
   isReminderPast,
 } from '@/utils/reminderTime';
@@ -75,16 +76,19 @@ function TaskRowInner({
   const dragEnabled = Boolean(onDragActivate) && !completed;
   const showPriorityMarker =
     task.priority === 'important' || task.priority === 'must_do_today';
+  // The row shows when the alert will actually ring, so a snoozed reminder
+  // reads as its pushed-out time rather than as already passed.
+  const reminderAt = effectiveReminderAt(task);
   // A reminder that already went by (or was never in the future) is shown struck through.
-  const reminderPast = !completed && isReminderPast(task.reminderAt);
+  const reminderPast = !completed && isReminderPast(reminderAt);
   // Name the day only when the time alone would be ambiguous.
   const reminderNeedsDay = task.dueDate
-    ? isReminderOnDifferentDay(task.reminderAt, task.dueDate)
-    : Boolean(task.reminderAt) && !isToday(task.reminderAt);
-  const reminderLabel = task.reminderAt
+    ? isReminderOnDifferentDay(reminderAt, task.dueDate)
+    : Boolean(reminderAt) && !isToday(reminderAt);
+  const reminderLabel = reminderAt
     ? reminderNeedsDay
-      ? `${formatDisplayDate(task.reminderAt)} ${formatTime(task.reminderAt)}`
-      : formatTime(task.reminderAt)
+      ? `${formatDisplayDate(reminderAt)} ${formatTime(reminderAt)}`
+      : formatTime(reminderAt)
     : '';
 
   const openTask = useCallback(() => {

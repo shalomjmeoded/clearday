@@ -7,6 +7,7 @@ import { mapRowToTask } from '@/features/tasks/taskMapper';
 import type { Task } from '@/types/task';
 import { createId } from '@/utils/id';
 import { nowIso } from '@/utils/dates';
+import { effectiveReminderAt } from '@/utils/reminderTime';
 
 type NotificationsModule = typeof import('expo-notifications');
 
@@ -158,7 +159,8 @@ export async function scheduleReminderForTask(
   task: Task,
   options: ScheduleOptions = {}
 ): Promise<void> {
-  if (!task.reminderAt || task.status !== 'active') return;
+  const fireAt = effectiveReminderAt(task);
+  if (!fireAt || task.status !== 'active') return;
 
   const Notifications = await loadNotifications();
   if (!Notifications) return;
@@ -171,7 +173,7 @@ export async function scheduleReminderForTask(
 
     await cancelReminderForTask(task.id);
 
-    const triggerDate = new Date(task.reminderAt);
+    const triggerDate = new Date(fireAt);
     if (triggerDate.getTime() <= Date.now()) return;
 
     await ensureCategory(Notifications);
@@ -196,7 +198,7 @@ export async function scheduleReminderForTask(
     const reminderId = createId();
     await db.runAsync(
       'INSERT INTO reminders (id, taskId, notificationId, scheduledAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
-      [reminderId, task.id, notificationId, task.reminderAt, now, now]
+      [reminderId, task.id, notificationId, fireAt, now, now]
     );
   } catch {
     // graceful failure (Expo Go, denied permission, etc.)
@@ -312,16 +314,11 @@ async function syncScheduledRemindersUnlocked(result: {
 
     const granted = (await getReminderPermissionStatus()) === 'granted';
 
+    const fireTime = (task: Task) =>
+      new Date(effectiveReminderAt(task)!).getTime();
     const due = tasks
-      .filter(
-        (task) =>
-          task.status === 'active' &&
-          new Date(task.reminderAt!).getTime() > nowMs
-      )
-      .sort(
-        (a, b) =>
-          new Date(a.reminderAt!).getTime() - new Date(b.reminderAt!).getTime()
-      );
+      .filter((task) => task.status === 'active' && fireTime(task) > nowMs)
+      .sort((a, b) => fireTime(a) - fireTime(b));
 
     let pending = 0;
     for (const task of due) {
@@ -333,7 +330,8 @@ async function syncScheduledRemindersUnlocked(result: {
       }
       pending += 1;
       const row = byTask.get(task.id);
-      const upToDate = row?.notificationId && row.scheduledAt === task.reminderAt;
+      const upToDate =
+        row?.notificationId && row.scheduledAt === effectiveReminderAt(task);
       if (upToDate) continue;
       await scheduleReminderForTask(task, { silent: true });
       result.scheduled += 1;
@@ -435,14 +433,18 @@ function readAction(actionIdentifier?: string): ReminderAction {
   return 'open';
 }
 
-/** Pushes a task's reminder out by the snooze interval. */
+/**
+ * Pushes the next alert out by the snooze interval. The chosen reminder time
+ * is left alone: it is what a repeat carries to its next date, and writing
+ * the snoozed moment over it made a daily 9:00 become 10:00 for good.
+ */
 export async function snoozeReminder(taskId: string): Promise<string | null> {
   const { taskRepository } = await import('@/features/tasks/taskRepository');
   const task = await taskRepository.getById(taskId);
-  if (!task || task.status !== 'active') return null;
-  const reminderAt = new Date(
+  if (!task || task.status !== 'active' || !task.reminderAt) return null;
+  const snoozedUntil = new Date(
     Date.now() + SNOOZE_MINUTES * 60_000
   ).toISOString();
-  await taskRepository.update(taskId, { reminderAt });
-  return reminderAt;
+  await taskRepository.update(taskId, { snoozedUntil });
+  return snoozedUntil;
 }

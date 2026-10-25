@@ -11,7 +11,7 @@
  * has the change is harmless.
  */
 import { DEFAULT_SETTINGS } from '@/types/settings';
-import { nowIso } from '@/utils/dates';
+import { nowIso, toDueDateIso } from '@/utils/dates';
 
 import { INBOX_LIST_ID, SCHEMA_VERSION } from './constants';
 import { getDb } from './client';
@@ -114,6 +114,39 @@ const MIGRATIONS: Migration[] = [
       await db.execAsync(
         'CREATE INDEX IF NOT EXISTS idx_reminders_taskId ON reminders(taskId)'
       );
+    },
+  },
+  {
+    // Snooze used to overwrite reminderAt, so a repeating task drifted an
+    // hour later every time it was snoozed. The override now lives apart
+    // from the chosen time.
+    version: 8,
+    async run(db) {
+      if (!(await hasColumn(db, 'tasks', 'snoozedUntil'))) {
+        await db.execAsync('ALTER TABLE tasks ADD COLUMN snoozedUntil TEXT');
+      }
+    },
+  },
+  {
+    // Due dates move from local midnight to local noon (see toDueDateIso).
+    // Each row is re-anchored to noon of the day it reads as on this device,
+    // so nothing the user sees changes; the row just stops sitting on the
+    // day boundary. Idempotent: a noon row maps to itself.
+    version: 9,
+    async run(db) {
+      const rows = await db.getAllAsync<{ id: string; dueDate: string }>(
+        'SELECT id, dueDate FROM tasks WHERE dueDate IS NOT NULL'
+      );
+      for (const row of rows) {
+        const parsed = new Date(row.dueDate);
+        if (Number.isNaN(parsed.getTime())) continue;
+        const normalized = toDueDateIso(parsed);
+        if (normalized === row.dueDate) continue;
+        await db.runAsync('UPDATE tasks SET dueDate = ? WHERE id = ?', [
+          normalized,
+          row.id,
+        ]);
+      }
     },
   },
 ];

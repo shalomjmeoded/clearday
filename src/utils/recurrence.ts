@@ -10,6 +10,7 @@ import {
 } from 'date-fns';
 
 import type { TaskRecurrence } from '@/types/recurrence';
+import { toDueDateIso } from '@/utils/dates';
 
 export const RECURRENCE_OPTIONS: { key: TaskRecurrence; label: string }[] = [
   { key: 'none', label: 'Never' },
@@ -73,8 +74,10 @@ export function getNextDueDate(
   // An unknown value would step by zero and never get past today.
   if (!isRecurring(recurrence)) return anchorIso;
 
+  // Only the calendar day of the anchor matters; stepping from local
+  // midnight keeps month and DST arithmetic on whole days.
   const anchor = startOfDay(parseISO(anchorIso));
-  if (Number.isNaN(anchor.getTime())) return startOfDay(now).toISOString();
+  if (Number.isNaN(anchor.getTime())) return toDueDateIso(now);
   const today = startOfDay(now);
 
   let steps = 1;
@@ -84,7 +87,7 @@ export function getNextDueDate(
     next = occurrenceFromAnchor(anchor, recurrence, steps);
   }
 
-  return next.toISOString();
+  return toDueDateIso(next);
 }
 
 /** Move reminder to the same clock time on the new due day. */

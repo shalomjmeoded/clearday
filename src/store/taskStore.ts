@@ -19,7 +19,7 @@ import { listRepository } from '@/features/lists/listRepository';
 import { getIsPro } from '@/store/proStore';
 import { useToastStore } from '@/store/toastStore';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
-import { formatDisplayDate } from '@/utils/dates';
+import { formatDisplayDate, isToday } from '@/utils/dates';
 import { isRecurring } from '@/utils/recurrence';
 
 /** Lets the checkmark finish before a recurring row is replaced by its next date. */
@@ -188,6 +188,7 @@ async function completeTaskInner(
     const previous = {
       dueDate: existing.dueDate,
       reminderAt: existing.reminderAt,
+      snoozedUntil: existing.snoozedUntil,
       priority: existing.priority,
     };
     useToastStore.getState().show(
@@ -332,7 +333,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           targetListId = matched.id;
         }
       }
-      if (dueDate && priority === 'must_do_today') {
+      // The parser always dates a pinned task today, so only a pin on some
+      // other day is a contradiction, and then the day wins.
+      if (dueDate && priority === 'must_do_today' && !isToday(dueDate)) {
         priority = 'normal';
       }
     } catch {
@@ -411,6 +414,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             status: existing.status,
             completedAt: existing.completedAt,
             reminderAt: existing.reminderAt,
+            snoozedUntil: existing.snoozedUntil,
           });
           await refreshAfterMutation(get, existing.listId);
           await get().refreshDone();

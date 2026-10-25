@@ -207,6 +207,7 @@ function normalizeTask(
     color: asOptionalString(task.color),
     dueDate: asOptionalString(task.dueDate),
     reminderAt: asOptionalString(task.reminderAt),
+    snoozedUntil: asOptionalString(task.snoozedUntil),
     recurrence: oneOf(task.recurrence, VALID_RECURRENCES, DEFAULT_RECURRENCE),
     recurringTaskId: asOptionalString(task.recurringTaskId),
     listId: listId && knownListIds.has(listId) ? listId : INBOX_LIST_ID,
@@ -326,8 +327,8 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
 
       for (const task of tasks) {
         await db.runAsync(
-          `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, recurrence, recurringTaskId, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tasks (id, title, notes, status, priority, color, dueDate, reminderAt, snoozedUntil, recurrence, recurringTaskId, listId, sortOrder, completedAt, createdAt, updatedAt, deletedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             task.id,
             task.title,
@@ -337,6 +338,7 @@ async function restoreBackupData(backup: ClearDayBackup): Promise<void> {
             task.color ?? null,
             task.dueDate ?? null,
             task.reminderAt ?? null,
+            task.snoozedUntil ?? null,
             task.recurrence,
             task.recurringTaskId ?? null,
             task.listId ?? INBOX_LIST_ID,

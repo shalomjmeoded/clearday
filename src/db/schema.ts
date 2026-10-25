@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   color TEXT,
   dueDate TEXT,
   reminderAt TEXT,
+  snoozedUntil TEXT,
   recurrence TEXT NOT NULL DEFAULT 'none',
   recurringTaskId TEXT,
   listId TEXT,

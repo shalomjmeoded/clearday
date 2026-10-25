@@ -1,11 +1,13 @@
-import { addDays, format, startOfDay } from 'date-fns';
+import { addDays, format } from 'date-fns';
+
+import { toDueDateIso } from '@/utils/dates';
 
 export function tomorrowIso(): string {
-  return startOfDay(addDays(new Date(), 1)).toISOString();
+  return toDueDateIso(addDays(new Date(), 1));
 }
 
 export function dayIso(daysFromToday: number): string {
-  return startOfDay(addDays(new Date(), daysFromToday)).toISOString();
+  return toDueDateIso(addDays(new Date(), daysFromToday));
 }
 
 export type DayOption = { iso: string; label: string };
@@ -16,7 +18,7 @@ export function getUpcomingDayOptions(count = 90): DayOption[] {
   for (let i = 1; i <= count; i++) {
     const date = addDays(new Date(), i);
     options.push({
-      iso: startOfDay(date).toISOString(),
+      iso: toDueDateIso(date),
       label: format(date, 'EEE, MMM d, yyyy'),
     });
   }

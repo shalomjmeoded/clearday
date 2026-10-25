@@ -22,6 +22,7 @@ export function mapRowToTask(row: Record<string, unknown>): Task {
     color: (row.color as string) ?? undefined,
     dueDate: (row.dueDate as string) ?? undefined,
     reminderAt: (row.reminderAt as string) ?? undefined,
+    snoozedUntil: (row.snoozedUntil as string) ?? undefined,
     recurrence: isKnownRecurrence(row.recurrence) ? row.recurrence : DEFAULT_RECURRENCE,
     recurringTaskId: (row.recurringTaskId as string) ?? undefined,
     listId: (row.listId as string) ?? undefined,

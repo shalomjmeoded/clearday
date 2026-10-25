@@ -5,7 +5,7 @@ import { mapRowToTask } from '@/features/tasks/taskMapper';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
 import type { CreateTaskInput, Task, UpdateTaskInput } from '@/types/task';
 import { createId } from '@/utils/id';
-import { nowIso, todayRange } from '@/utils/dates';
+import { nowIso, todayDueIso } from '@/utils/dates';
 import {
   getNextDueDate,
   isRecurring,
@@ -27,13 +27,27 @@ async function nextSortOrder(listId: string): Promise<number> {
   return (row?.maxOrder ?? -1) + 1;
 }
 
+/**
+ * "Must do today" names a day, so a pinned task always carries one. Quick
+ * add's "!!" has done this since the start; the toolbar pin and the detail
+ * screen now agree, so a pin left undone turns overdue tomorrow instead of
+ * floating on Today with no date behind it.
+ */
+function resolveDueDateForPriority(
+  dueDate: string | undefined,
+  priority: Task['priority']
+): string | undefined {
+  if (priority !== 'must_do_today' || dueDate) return dueDate;
+  return todayDueIso();
+}
+
 function resolveDueDateForRecurrence(
   dueDate: string | undefined,
   recurrence: Task['recurrence']
 ): string | undefined {
   if (!isRecurring(recurrence)) return dueDate;
   if (dueDate) return dueDate;
-  return todayRange().start;
+  return todayDueIso();
 }
 
 export const taskRepository = {
@@ -53,14 +67,18 @@ export const taskRepository = {
     const sortOrder =
       input.sortOrder ?? (await nextSortOrder(listId));
     const recurrence = input.recurrence ?? DEFAULT_RECURRENCE;
-    const dueDate = resolveDueDateForRecurrence(input.dueDate, recurrence);
+    const priority = input.priority ?? 'normal';
+    const dueDate = resolveDueDateForPriority(
+      resolveDueDateForRecurrence(input.dueDate, recurrence),
+      priority
+    );
 
     const task: Task = {
       id: createId(),
       title: input.title.trim(),
       notes: input.notes,
       status: 'active',
-      priority: input.priority ?? 'normal',
+      priority,
       color: input.color,
       dueDate,
       reminderAt: input.reminderAt,
@@ -103,11 +121,13 @@ export const taskRepository = {
     if (!existing) return null;
 
     const recurrence = input.recurrence ?? existing.recurrence;
+    const priority = input.priority ?? existing.priority;
     let dueDate =
       'dueDate' in input ? input.dueDate : existing.dueDate;
     if (isRecurring(recurrence) && !dueDate) {
-      dueDate = todayRange().start;
+      dueDate = todayDueIso();
     }
+    dueDate = resolveDueDateForPriority(dueDate, priority);
 
     const db = await getDb();
     const now = nowIso();
@@ -132,9 +152,19 @@ export const taskRepository = {
       // keep the same clock time on the new day instead of firing on the old one.
       updated.reminderAt = shiftReminderToDueDate(existing.reminderAt, dueDate);
     }
+    if ('snoozedUntil' in input) {
+      updated.snoozedUntil = input.snoozedUntil;
+    } else if (
+      updated.reminderAt !== existing.reminderAt ||
+      dueDate !== existing.dueDate
+    ) {
+      // A snooze belongs to the alert it pushed. Once the reminder or the
+      // day changes (including a repeat advancing), it has nothing to push.
+      updated.snoozedUntil = undefined;
+    }
 
     await db.runAsync(
-      `UPDATE tasks SET title = ?, notes = ?, status = ?, priority = ?, color = ?, dueDate = ?, reminderAt = ?,
+      `UPDATE tasks SET title = ?, notes = ?, status = ?, priority = ?, color = ?, dueDate = ?, reminderAt = ?, snoozedUntil = ?,
         recurrence = ?, recurringTaskId = ?, listId = ?, sortOrder = ?, completedAt = ?, updatedAt = ?, deletedAt = ?
        WHERE id = ?`,
       [
@@ -145,6 +175,7 @@ export const taskRepository = {
         updated.color ?? null,
         updated.dueDate ?? null,
         updated.reminderAt ?? null,
+        updated.snoozedUntil ?? null,
         updated.recurrence,
         updated.recurringTaskId ?? null,
         updated.listId ?? INBOX_LIST_ID,
@@ -204,7 +235,7 @@ export const taskRepository = {
     if (!existing) return { task: null };
 
     if (isRecurring(existing.recurrence)) {
-      const anchor = existing.dueDate ?? todayRange().start;
+      const anchor = existing.dueDate ?? todayDueIso();
       const nextDue = getNextDueDate(anchor, existing.recurrence);
       let reminderAt = existing.reminderAt;
       if (reminderAt) {
@@ -219,6 +250,7 @@ export const taskRepository = {
         completedAt: undefined,
         dueDate: nextDue,
         reminderAt,
+        snoozedUntil: undefined,
         priority,
       });
       return { task, occurrenceId };
@@ -272,8 +304,13 @@ export const taskRepository = {
     });
   },
 
+  /**
+   * The reminder stays on the row, as it does for a completed task: leaving
+   * the active state cancels the alert (see update), and unarchiving puts a
+   * still-future one back on the clock instead of losing it.
+   */
   async archive(id: string): Promise<Task | null> {
-    return this.update(id, { status: 'archived', reminderAt: undefined });
+    return this.update(id, { status: 'archived' });
   },
 
   /** Brings an archived task back to the active list. */

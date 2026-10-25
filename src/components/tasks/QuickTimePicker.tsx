@@ -8,7 +8,7 @@ import { typography } from '@/theme/typography';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { formatDisplayDate, formatTime } from '@/utils/dates';
+import { formatDisplayDate, formatTime, toDueDateIso } from '@/utils/dates';
 import {
   buildReminderIso,
   formatTimeKey,
@@ -62,13 +62,7 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
       return;
     }
     await triggerSelectionHaptic();
-    const resolvedDue =
-      dueDate ??
-      (() => {
-        const base = new Date(reminderAt);
-        base.setHours(0, 0, 0, 0);
-        return base.toISOString();
-      })();
+    const resolvedDue = dueDate ?? toDueDateIso(new Date(reminderAt));
     onSelect(reminderAt, resolvedDue);
     onClose();
     setShowCustom(false);

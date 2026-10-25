@@ -38,9 +38,10 @@ import {
   RECURRENCE_OPTIONS,
   shiftReminderToDueDate,
 } from '@/utils/recurrence';
-import { formatDisplayDate, formatTime, isToday, todayRange } from '@/utils/dates';
+import { formatDisplayDate, formatTime, isToday, todayDueIso } from '@/utils/dates';
 import {
   buildReminderIso,
+  effectiveReminderAt,
   getHoursMinutesFromIso,
   isReminderOnDifferentDay,
   isReminderPast,
@@ -406,7 +407,13 @@ export default function TaskDetailScreen() {
     if (!stillThere) router.back();
   };
 
-  const reminderIsPast = task?.status === 'active' && isReminderPast(reminderAt);
+  // The editor shows the chosen time; whether it is "behind us" depends on
+  // when the alert will actually ring, which a snooze may have pushed out.
+  const reminderIsPast =
+    task?.status === 'active' &&
+    isReminderPast(
+      reminderAt === task.reminderAt ? effectiveReminderAt(task) : reminderAt
+    );
   // Show the day whenever it is not obvious: undated task, or reminder on another day.
   const reminderShowsDay =
     Boolean(reminderAt) &&
@@ -479,7 +486,7 @@ export default function TaskDetailScreen() {
                 // "Must do today" and a later due date contradict each other,
                 // so choosing it pulls the task back to today.
                 if (p.key === 'must_do_today' && dueDate && !isToday(dueDate)) {
-                  const today = todayRange().start;
+                  const today = todayDueIso();
                   setDueDate(today);
                   followDueDate(today);
                   await persist({ priority: p.key, dueDate: today });
@@ -674,8 +681,9 @@ export default function TaskDetailScreen() {
                     // A repeat always has a start date; the repository fills
                     // in today, so mirror that here rather than show "no date".
                     if (option.key !== 'none' && !dueDate) {
-                      setDueDate(todayRange().start);
-                      await persist({ recurrence: option.key, dueDate: todayRange().start });
+                      const today = todayDueIso();
+                      setDueDate(today);
+                      await persist({ recurrence: option.key, dueDate: today });
                       return;
                     }
                     await persist({ recurrence: option.key });
