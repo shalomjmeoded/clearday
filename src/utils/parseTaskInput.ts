@@ -32,18 +32,25 @@ export interface ParseTaskInputOptions {
    * not silently turned into "standup".
    */
   allowRecurrence?: boolean;
+  /**
+   * When provided, a "#tag" is only consumed if it names one of these lists;
+   * an unknown tag stays in the title instead of silently vanishing. Left
+   * out, any tag is consumed (legacy behavior for callers without lists).
+   */
+  knownListNames?: string[];
   /** Injectable clock for tests. */
   now?: Date;
 }
 
 /**
- * A recurrence word is only consumed when it reads as a modifier rather than
- * part of the name. It qualifies as a modifier when it trails the phrase
- * ("water plants weekly") or when enough words remain to still form a title
- * ("review budget monthly with Sam"). A leading word on a short phrase stays
- * put, so "Daily standup" keeps its name.
+ * A keyword is only consumed when it reads as a modifier rather than part of
+ * the name. It qualifies as a modifier when it trails the phrase ("water
+ * plants weekly", "call dentist monday") or when enough words remain to
+ * still form a title ("review budget monthly with Sam"). A leading word on a
+ * short phrase stays put, so "Daily standup" and "Monday standup" keep their
+ * names. Applies to recurrence words and weekday names alike.
  */
-const MIN_TITLE_WORDS_AFTER_RECURRENCE = 2;
+const MIN_TITLE_WORDS_AFTER_KEYWORD = 2;
 
 const RECURRENCE_KEYWORDS: Record<string, TaskRecurrence> = {
   daily: 'daily',
@@ -65,6 +72,25 @@ const WEEKDAYS: Record<string, (date: Date) => Date> = {
   saturday: nextSaturday,
   sunday: nextSunday,
 };
+
+/**
+ * Days per "in N <unit>" unit. Bare "m" is deliberately absent: it reads as
+ * minutes to most people, and treating it as months silently deferred a task
+ * by five months. Months need "mo"/"month"/"months".
+ */
+function inUnitDays(unit: string): number | undefined {
+  if (unit === 'd' || unit === 'day' || unit === 'days') return 1;
+  if (unit === 'w' || unit === 'week' || unit === 'weeks') return 7;
+  if (unit === 'mo' || unit === 'month' || unit === 'months') return 30;
+  return undefined;
+}
+
+/** Case-insensitive, with spaces in the list name optional ("#shoppinglist"). */
+export function listNameMatchesHint(name: string, hint: string): boolean {
+  const key = hint.toLowerCase();
+  const lower = name.toLowerCase();
+  return lower === key || lower.replace(/\s+/g, '') === key;
+}
 
 function parseTimeToken(
   token: string,
@@ -104,26 +130,28 @@ export function parseTaskInput(
   const now = options.now ?? new Date();
   let text = raw.trim();
   let priority: TaskPriority = 'normal';
-  let dueDate: Date | undefined;
-  let reminderAt: Date | undefined;
   let listHint: string | undefined;
   let recurrence: TaskRecurrence | undefined;
 
-  if (text.startsWith('!!')) {
-    priority = 'must_do_today';
-    text = text.slice(2).trim();
-  } else if (text.startsWith('!')) {
-    priority = 'important';
-    text = text.slice(1).trim();
+  const bangPrefix = text.match(/^(!+)\s*/);
+  if (bangPrefix) {
+    // "!!!" is at least as urgent as "!!" — extra marks never downgrade.
+    priority = bangPrefix[1].length >= 2 ? 'must_do_today' : 'important';
+    text = text.slice(bangPrefix[0].length).trim();
   }
 
-  const tokens = text.split(/\s+/);
+  const tokens = text.length > 0 ? text.split(/\s+/) : [];
   const kept: string[] = [];
   let recurrenceCandidate:
     | { recurrence: TaskRecurrence; keptIndex: number }
     | undefined;
-  let baseDay = startOfDay(now);
-  let explicitDay = false;
+  let weekdayCandidate: { weekday: string; keptIndex: number } | undefined;
+  const today = startOfDay(now);
+  /** The calendar day named by an explicit day token, when one was given. */
+  let dueDay: Date | undefined;
+  /** Clock time named by a time token; anchored onto a day after the scan. */
+  let pendingTime: { hours: number; minutes: number } | undefined;
+  let tonight = false;
 
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
@@ -131,16 +159,29 @@ export function parseTaskInput(
 
     // Standalone priority marks work anywhere, not just as a leading prefix
     // ("buy milk !! today" used to keep the "!!" in the title).
-    if (token === '!!' || lower === 'p1' || lower === 'p0') {
+    if (/^!{2,}$/.test(token) || lower === 'p1' || lower === 'p0') {
       priority = 'must_do_today';
       continue;
     }
     if (token === '!' || lower === 'p2' || lower === 'p!') {
-      priority = 'important';
+      // A single mark raises a normal task but never downgrades a pin.
+      if (priority === 'normal') priority = 'important';
       continue;
     }
     if (lower.startsWith('#') && lower.length > 1) {
-      listHint = token.slice(1);
+      // Trailing punctuation belongs to the sentence, not the list name
+      // ("buy milk #groceries, eggs").
+      const hint = token.slice(1).replace(/[!,.;:?]+$/, '');
+      if (
+        hint.length > 0 &&
+        (!options.knownListNames ||
+          options.knownListNames.some((name) => listNameMatchesHint(name, hint)))
+      ) {
+        listHint = hint;
+        continue;
+      }
+      // No such list — keep the text instead of losing it.
+      kept.push(token);
       continue;
     }
     if (allowRecurrence && RECURRENCE_KEYWORDS[lower]) {
@@ -158,44 +199,45 @@ export function parseTaskInput(
     }
 
     if (lower === 'today') {
-      baseDay = startOfDay(now);
-      dueDate = baseDay;
-      explicitDay = true;
+      dueDay = today;
       continue;
     }
     if (lower === 'tonight') {
-      // Past 8pm, "tonight" would ring immediately; treat it as tomorrow
-      // night, the same way a bare passed time rolls forward.
-      let evening = setHours(setMinutes(startOfDay(now), 0), 20);
-      if (evening.getTime() <= now.getTime()) evening = addDays(evening, 1);
-      baseDay = startOfDay(evening);
-      dueDate = baseDay;
-      explicitDay = true;
-      reminderAt = evening;
+      // Resolved after the scan so an explicit time wins over the 8pm default
+      // regardless of word order ("9pm tonight" vs "tonight 9pm").
+      tonight = true;
       continue;
     }
     if (lower === 'tomorrow') {
-      baseDay = startOfDay(addDays(now, 1));
-      dueDate = baseDay;
-      explicitDay = true;
+      dueDay = startOfDay(addDays(now, 1));
       continue;
     }
-    const inMatch = lower.match(/^in(\d+)(d|days|w|weeks|m|months)$/);
+    const inMatch = lower.match(/^in(\d+)(d|days?|w|weeks?|mo|months?)$/);
     if (inMatch) {
-      const n = parseInt(inMatch[1], 10);
-      const unit = inMatch[2];
-      let days = n;
-      if (unit.startsWith('w')) days = n * 7;
-      if (unit.startsWith('m')) days = n * 30;
-      baseDay = startOfDay(addDays(now, days));
-      dueDate = baseDay;
-      explicitDay = true;
+      const days = parseInt(inMatch[1], 10) * (inUnitDays(inMatch[2]) ?? 1);
+      dueDay = startOfDay(addDays(now, days));
       continue;
+    }
+    // The spaced form: "in 3 days", "in 2 weeks". Only full unit words — a
+    // bare "in 3 d" is more likely a title than a date.
+    if (lower === 'in' && index + 2 < tokens.length) {
+      const amount = tokens[index + 1].match(/^\d+$/);
+      const unitDays = inUnitDays(tokens[index + 2].toLowerCase());
+      if (amount && unitDays !== undefined && tokens[index + 2].length > 1) {
+        dueDay = startOfDay(addDays(now, parseInt(amount[0], 10) * unitDays));
+        index += 2;
+        continue;
+      }
     }
     if (WEEKDAYS[lower]) {
-      baseDay = startOfDay(WEEKDAYS[lower](now));
-      dueDate = baseDay;
-      explicitDay = true;
+      if (index === tokens.length - 1) {
+        dueDay = startOfDay(WEEKDAYS[lower](now));
+        continue;
+      }
+      // Same rule as recurrence words: decide once the title is known, so
+      // "Monday standup" keeps its name but "monday call the dentist" dates.
+      weekdayCandidate = { weekday: lower, keptIndex: kept.length };
+      kept.push(token);
       continue;
     }
 
@@ -204,36 +246,87 @@ export function parseTaskInput(
     if (
       lower === 'at' &&
       index + 1 < tokens.length &&
-      parseTimeToken(tokens[index + 1], baseDay)
+      parseTimeToken(tokens[index + 1], today)
     ) {
       continue;
     }
 
-    let time = parseTimeToken(token, baseDay);
+    const time = parseTimeToken(token, today);
     if (time) {
-      // A bare time that has already passed today means tomorrow
-      // ("call Bob 8am" typed at 10am). An explicit day is respected as-is.
-      if (!explicitDay && time.getTime() <= now.getTime()) {
-        time = addDays(time, 1);
-      }
-      reminderAt = time;
-      if (!dueDate || !explicitDay) dueDate = startOfDay(time);
+      pendingTime = { hours: time.getHours(), minutes: time.getMinutes() };
       continue;
     }
 
     kept.push(token);
   }
 
+  // Deferred keywords: consume when enough title survives without them, or
+  // when the word ends the phrase once times and tags are set aside
+  // ("standup friday 9am" — friday trails the name even though 9am follows).
+  const pendingRemovals =
+    (recurrenceCandidate ? 1 : 0) + (weekdayCandidate ? 1 : 0);
+  const countOk =
+    kept.length - pendingRemovals >= MIN_TITLE_WORDS_AFTER_KEYWORD;
+  const trailsTitle = (keptIndex: number) =>
+    kept.length >= 2 && keptIndex === kept.length - 1;
+  const removals: number[] = [];
+  if (weekdayCandidate && (countOk || trailsTitle(weekdayCandidate.keptIndex))) {
+    dueDay = startOfDay(WEEKDAYS[weekdayCandidate.weekday](now));
+    removals.push(weekdayCandidate.keptIndex);
+  }
   if (
     recurrenceCandidate &&
-    kept.length - 1 >= MIN_TITLE_WORDS_AFTER_RECURRENCE
+    (countOk || trailsTitle(recurrenceCandidate.keptIndex))
   ) {
-    kept.splice(recurrenceCandidate.keptIndex, 1);
     recurrence = recurrenceCandidate.recurrence;
+    removals.push(recurrenceCandidate.keptIndex);
+  }
+  removals
+    .sort((a, b) => b - a)
+    .forEach((keptIndex) => kept.splice(keptIndex, 1));
+
+  // The reminder is anchored only now, once every day word has been seen, so
+  // "call Bob 8am tomorrow" lands on tomorrow just like "tomorrow 8am".
+  let dueDate: Date | undefined = dueDay;
+  let reminderAt: Date | undefined;
+
+  if (tonight && !dueDay) {
+    // Past the chosen moment, "tonight" means tomorrow night — the same way
+    // a bare passed time rolls forward.
+    let evening = setMinutes(
+      setHours(today, pendingTime?.hours ?? 20),
+      pendingTime?.minutes ?? 0
+    );
+    if (evening.getTime() <= now.getTime()) evening = addDays(evening, 1);
+    reminderAt = evening;
+    dueDate = startOfDay(evening);
+  } else if (tonight && dueDay) {
+    reminderAt = setMinutes(
+      setHours(dueDay, pendingTime?.hours ?? 20),
+      pendingTime?.minutes ?? 0
+    );
+  } else if (pendingTime) {
+    if (dueDay) {
+      // An explicit day is respected as-is, even when already passed.
+      reminderAt = setMinutes(
+        setHours(dueDay, pendingTime.hours),
+        pendingTime.minutes
+      );
+    } else {
+      // A bare time that has already passed today means tomorrow
+      // ("call Bob 8am" typed at 10am).
+      let time = setMinutes(
+        setHours(today, pendingTime.hours),
+        pendingTime.minutes
+      );
+      if (time.getTime() <= now.getTime()) time = addDays(time, 1);
+      reminderAt = time;
+      dueDate = startOfDay(time);
+    }
   }
 
   if (priority === 'must_do_today' && !dueDate) {
-    dueDate = startOfDay(now);
+    dueDate = today;
   }
 
   return {

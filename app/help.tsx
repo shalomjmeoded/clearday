@@ -19,7 +19,7 @@ const SECTIONS = [
   {
     title: 'Dates & reminders',
     body:
-      'Type naturally when adding tasks:\n\n• “Call Daniel tomorrow 10am”\n• “Pay rent Friday”\n• “Gym today 18:00”\n\nA bare time that has already passed means tomorrow. Toolbar selections override parsed dates. Moving a task to another day moves its reminder with it.',
+      'Type naturally when adding tasks:\n\n• “Call Daniel tomorrow 10am”\n• “Pay rent Friday”\n• “Gym today 18:00”\n• “Renew passport in 3 weeks”\n\nA bare time that has already passed means tomorrow, and the day can come before or after the time. Toolbar selections override parsed dates. Moving a task to another day moves its reminder with it.',
   },
   {
     title: 'Repeating tasks (Pro)',

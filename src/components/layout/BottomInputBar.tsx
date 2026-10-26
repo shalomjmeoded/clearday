@@ -17,11 +17,12 @@ import { elevation } from '@/theme/elevation';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useListStore } from '@/store/listStore';
 import { useProStore } from '@/store/proStore';
 import type { QuickAddOptions } from '@/types/quickAdd';
 import { DEFAULT_RECURRENCE, type TaskRecurrence } from '@/types/recurrence';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
-import { formatDisplayDate, formatTime, todayDueIso } from '@/utils/dates';
+import { formatDisplayDate, formatTime, isToday, todayDueIso } from '@/utils/dates';
 import { tomorrowIso } from '@/utils/scheduleDates';
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import { router } from 'expo-router';
@@ -77,6 +78,7 @@ export function BottomInputBar({
   const [showColor, setShowColor] = useState(false);
   const [showRecurrence, setShowRecurrence] = useState(false);
   const isPro = useProStore((s) => s.isPro);
+  const lists = useListStore((s) => s.lists);
   const localInputRef = useRef<TextInput>(null);
   const pickerOpenRef = useRef(false);
   const suppressBlurRef = useRef(false);
@@ -100,21 +102,32 @@ export function BottomInputBar({
     const trimmed = text.trim();
     if (!trimmed) return '';
     try {
-      const parsed = parseTaskInput(trimmed, { allowRecurrence: isPro });
+      const parsed = parseTaskInput(trimmed, {
+        allowRecurrence: isPro,
+        knownListNames: lists.map((l) => l.name),
+      });
       const parts: string[] = [];
       if (parsed.dueDate && !draftDueDate) parts.push(formatDisplayDate(parsed.dueDate));
       if (parsed.reminderAt && !draftReminderAt) parts.push(formatTime(parsed.reminderAt));
       if (parsed.recurrence && isRecurring(parsed.recurrence) && !isRecurring(draftRecurrence)) {
         parts.push(formatRecurrenceLabel(parsed.recurrence));
       }
-      if (parsed.priority === 'must_do_today' && !draftPinned) parts.push('Pinned to today');
-      else if (parsed.priority === 'important') parts.push('Starred');
+      // On another day the pin yields to the date at save time, so the hint
+      // only promises a pin when the task will actually land on today.
+      const effectiveDue = draftDueDate ?? parsed.dueDate;
+      if (
+        parsed.priority === 'must_do_today' &&
+        !draftPinned &&
+        (!effectiveDue || isToday(effectiveDue))
+      ) {
+        parts.push('Pinned to today');
+      } else if (parsed.priority === 'important') parts.push('Starred');
       if (parsed.listHint) parts.push(`List: ${parsed.listHint}`);
       return parts.join(' · ');
     } catch {
       return '';
     }
-  }, [text, isPro, draftDueDate, draftReminderAt, draftRecurrence, draftPinned]);
+  }, [text, isPro, lists, draftDueDate, draftReminderAt, draftRecurrence, draftPinned]);
 
   const hasDraftContent =
     Boolean(text.trim()) ||
@@ -236,6 +249,8 @@ export function BottomInputBar({
     }
     setDraftDatePick('tomorrow');
     setDraftDueDate(tomorrowIso());
+    // The day wins over a pin at save time; mirror that in the draft.
+    setDraftPinned(false);
     focusInput();
   };
 
@@ -267,7 +282,12 @@ export function BottomInputBar({
   const togglePin = async () => {
     beginToolbarAction();
     await triggerSelectionHaptic();
-    setDraftPinned((value) => !value);
+    // A pin means today; a date on another day would silently win at save
+    // time, so pinning clears it rather than leaving both toggles lit.
+    if (!draftPinned && draftDueDate && !isToday(draftDueDate)) {
+      clearDatePick();
+    }
+    setDraftPinned(!draftPinned);
     focusInput();
   };
 
@@ -426,7 +446,7 @@ export function BottomInputBar({
               if (!draftActiveRef.current) onDismissEmpty?.();
             }, 120);
           }}
-          blurOnSubmit={false}
+          submitBehavior="submit"
         />
         {text.trim() ? (
           <Pressable
@@ -482,6 +502,7 @@ export function BottomInputBar({
         onSelect={(iso) => {
           setDraftDatePick('pick');
           setDraftDueDate(iso);
+          if (!isToday(iso)) setDraftPinned(false);
           focusInput();
         }}
       />

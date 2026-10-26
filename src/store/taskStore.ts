@@ -12,7 +12,7 @@ import {
   fetchTomorrowTasks,
   fetchTomorrowCompletedTasks,
 } from '@/features/tasks/taskQueries';
-import { parseTaskInput } from '@/utils/parseTaskInput';
+import { listNameMatchesHint, parseTaskInput } from '@/utils/parseTaskInput';
 import type { QuickAddOptions } from '@/types/quickAdd';
 import type { Task } from '@/types/task';
 import { INBOX_LIST_ID } from '@/db/constants';
@@ -21,7 +21,8 @@ import { getIsPro } from '@/store/proStore';
 import { useToastStore } from '@/store/toastStore';
 import { DEFAULT_RECURRENCE } from '@/types/recurrence';
 import { formatDisplayDate, isToday } from '@/utils/dates';
-import { isRecurring } from '@/utils/recurrence';
+import { isRecurring, shiftReminderToDueDate } from '@/utils/recurrence';
+import { isReminderOnDifferentDay } from '@/utils/reminderTime';
 
 /** Lets the checkmark finish before a recurring row is replaced by its next date. */
 const RECURRING_ADVANCE_DELAY_MS = 260;
@@ -379,29 +380,28 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const isPro = getIsPro();
 
     try {
+      // Known list names make "#tag" safe: an unknown tag stays in the title
+      // instead of vanishing into the default list.
+      const lists = trimmed.includes('#')
+        ? await listRepository.getAll()
+        : undefined;
       // Free users keep recurrence words in the title rather than losing them.
-      const parsed = parseTaskInput(trimmed, { allowRecurrence: isPro });
+      const parsed = parseTaskInput(trimmed, {
+        allowRecurrence: isPro,
+        knownListNames: lists?.map((l) => l.name),
+      });
       title = parsed.title || trimmed;
       priority = parsed.priority;
       dueDate = parsed.dueDate ?? dueDate;
       reminderAt = parsed.reminderAt;
       recurrence = parsed.recurrence;
-      if (parsed.listHint) {
-        const lists = await listRepository.getAll();
-        const hint = parsed.listHint.toLowerCase();
-        const matched = lists.find(
-          (l) =>
-            l.name.toLowerCase() === hint ||
-            l.name.toLowerCase().replace(/\s+/g, '') === hint
+      if (parsed.listHint && lists) {
+        const matched = lists.find((l) =>
+          listNameMatchesHint(l.name, parsed.listHint!)
         );
         if (matched) {
           targetListId = matched.id;
         }
-      }
-      // The parser always dates a pinned task today, so only a pin on some
-      // other day is a contradiction, and then the day wins.
-      if (dueDate && priority === 'must_do_today' && !isToday(dueDate)) {
-        priority = 'normal';
       }
     } catch {
       // Parser failed — still create as plain text.
@@ -417,6 +417,22 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     if (recurrence && isRecurring(recurrence) && !isPro) {
       recurrence = DEFAULT_RECURRENCE;
+    }
+
+    // The parser always dates a pinned task today, so only a pin on some
+    // other day is a contradiction, and then the day wins. Checked after the
+    // toolbar options so a pinned draft dated tomorrow can't land in both
+    // Today (by pin) and Tomorrow (by date).
+    if (dueDate && priority === 'must_do_today' && !isToday(dueDate)) {
+      priority = 'normal';
+    }
+
+    // Quick add offers no day-before reminders, so a reminder on a different
+    // day than the task (a toolbar date picked after the reminder, or a
+    // rolled bare time overridden by a date chip) moves to the due day at
+    // the same clock time — matching what editing a task's date does.
+    if (dueDate && reminderAt && isReminderOnDifferentDay(reminderAt, dueDate)) {
+      reminderAt = shiftReminderToDueDate(reminderAt, dueDate);
     }
 
     try {

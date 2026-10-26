@@ -367,6 +367,79 @@ async function main() {
     assert.equal(parsed.title, 'daily');
   });
 
+  await test('parser: a time before the day word still lands on that day', () => {
+    // 7am — "8am" has not passed, so the old code anchored it on today.
+    const now = local(2026, 10, 23, 7); // a Friday
+    const tomorrow = parseTaskInput('call Bob 8am tomorrow', { now });
+    assert.equal(dayOf(tomorrow.dueDate!), '2026-10-24');
+    assert.equal(dayOf(tomorrow.reminderAt!), '2026-10-24');
+    assert.equal(timeOf(tomorrow.reminderAt!), '8:00');
+    assert.equal(tomorrow.title, 'call Bob');
+    const friday = parseTaskInput('dentist 5pm friday', { now });
+    assert.equal(dayOf(friday.dueDate!), '2026-10-30');
+    assert.equal(dayOf(friday.reminderAt!), '2026-10-30');
+    assert.equal(timeOf(friday.reminderAt!), '17:00');
+    assert.equal(friday.title, 'dentist');
+  });
+
+  await test('parser: an explicit time wins over the tonight default in any order', () => {
+    const now = local(2026, 10, 23, 10);
+    for (const raw of ['dinner tonight 9pm', 'dinner 9pm tonight']) {
+      const parsed = parseTaskInput(raw, { now });
+      assert.equal(dayOf(parsed.reminderAt!), '2026-10-23', raw);
+      assert.equal(timeOf(parsed.reminderAt!), '21:00', raw);
+      assert.equal(parsed.title, 'dinner', raw);
+    }
+  });
+
+  await test('parser: three or more marks stay a pin, "!" never downgrades one', () => {
+    assert.equal(parseTaskInput('!!! urgent thing').priority, 'must_do_today');
+    assert.equal(parseTaskInput('!!! urgent thing').title, 'urgent thing');
+    assert.equal(parseTaskInput('!! fix sink !').priority, 'must_do_today');
+  });
+
+  await test('parser: weekday names follow the recurrence guard', () => {
+    const now = local(2026, 10, 23, 10); // a Friday
+    const standup = parseTaskInput('Monday standup', { now });
+    assert.equal(standup.title, 'Monday standup');
+    assert.equal(standup.dueDate, undefined);
+    const dated = parseTaskInput('monday call the dentist', { now });
+    assert.equal(dated.title, 'call the dentist');
+    assert.equal(dayOf(dated.dueDate!), '2026-10-26');
+    // Trailing once times are set aside: "friday" still dates the task.
+    const timed = parseTaskInput('standup friday 9am', { now });
+    assert.equal(timed.title, 'standup');
+    assert.equal(dayOf(timed.dueDate!), '2026-10-30');
+    assert.equal(timeOf(timed.reminderAt!), '9:00');
+  });
+
+  await test('parser: spaced "in N days/weeks" works; bare "m" is not months', () => {
+    const now = local(2026, 10, 23, 10);
+    assert.equal(dayOf(parseTaskInput('pay rent in 3 days', { now }).dueDate!), '2026-10-26');
+    assert.equal(parseTaskInput('pay rent in 3 days', { now }).title, 'pay rent');
+    assert.equal(dayOf(parseTaskInput('dentist in 2 weeks', { now }).dueDate!), '2026-11-6');
+    assert.equal(dayOf(parseTaskInput('renew in1mo', { now }).dueDate!), '2026-11-22');
+    // "in5m" reads as minutes, not months — it stays in the title.
+    const minutes = parseTaskInput('ping Sam in5m', { now });
+    assert.equal(minutes.dueDate, undefined);
+    assert.equal(minutes.title, 'ping Sam in5m');
+  });
+
+  await test('parser: list hints drop trailing punctuation and unknown tags stay put', () => {
+    const matched = parseTaskInput('buy milk #errands, eggs', {
+      knownListNames: ['Errands'],
+    });
+    assert.equal(matched.listHint, 'errands');
+    assert.equal(matched.title, 'buy milk eggs');
+    const unknown = parseTaskInput('buy milk #typo', {
+      knownListNames: ['Errands'],
+    });
+    assert.equal(unknown.listHint, undefined);
+    assert.equal(unknown.title, 'buy milk #typo');
+    // Without known names the legacy consume-anything behavior stands.
+    assert.equal(parseTaskInput('buy milk #anything').listHint, 'anything');
+  });
+
   // ---- repository -----------------------------------------------------------
   const FUTURE_DAY = (days: number, h = 9) => {
     const d = new Date();
@@ -2939,6 +3012,52 @@ async function main() {
     assert.equal(later!.priority, 'normal', 'the typed day wins over the pin');
     assert.equal(dayOf(later!.dueDate!), dayOf(FUTURE_DAY(1).toISOString()));
     assert.ok((await fetchTodayTasks()).some((t) => t.id === bang!.id));
+  });
+
+  await test('pin: a toolbar pin with a toolbar date on another day yields to the date', async () => {
+    await freshDb();
+    const pinned = await useTaskStore.getState().addTask('buy milk', INBOX_LIST_ID, {
+      priority: 'must_do_today',
+      dueDate: tomorrowIso(),
+    });
+    assert.equal(pinned!.priority, 'normal', 'the chosen day wins over the pin');
+    assert.equal(dayOf(pinned!.dueDate!), dayOf(FUTURE_DAY(1).toISOString()));
+    assert.ok(
+      !(await fetchTodayTasks()).some((t) => t.id === pinned!.id),
+      'not haunting Today'
+    );
+    assert.ok((await fetchTomorrowTasks()).some((t) => t.id === pinned!.id));
+  });
+
+  await test('reminder: quick add moves a reminder onto the due day', async () => {
+    await freshDb();
+    // Reminder picked for today, then the date moved to tomorrow.
+    const todayAt18 = new Date();
+    todayAt18.setHours(18, 0, 0, 0);
+    const moved = await useTaskStore.getState().addTask('water plants', INBOX_LIST_ID, {
+      dueDate: tomorrowIso(),
+      reminderAt: todayAt18.toISOString(),
+    });
+    assert.equal(dayOf(moved!.reminderAt!), dayOf(moved!.dueDate!));
+    assert.equal(timeOf(moved!.reminderAt!), '18:00');
+    // A typed passed time rolls to tomorrow; a Today chip pulls it back.
+    const now = new Date();
+    const passedHour = `${((now.getHours() + 23) % 24) || 12}${now.getHours() - 1 >= 12 ? 'pm' : 'am'}`;
+    const pulled = await useTaskStore.getState().addTask(`call Bob ${passedHour}`, INBOX_LIST_ID, {
+      dueDate: toDueDateIso(now),
+    });
+    assert.equal(dayOf(pulled!.reminderAt!), dayOf(now.toISOString()), 'reminder on the due day');
+  });
+
+  await test('list hint: an unknown "#tag" keeps its text and the default list', async () => {
+    await freshDb();
+    await listRepository.create('Errands');
+    const unknown = await useTaskStore.getState().addTask('buy milk #groceris');
+    assert.equal(unknown!.title, 'buy milk #groceris', 'typo kept, not swallowed');
+    assert.equal(unknown!.listId, INBOX_LIST_ID);
+    const matched = await useTaskStore.getState().addTask('buy milk #errands, now');
+    assert.equal(matched!.title, 'buy milk now');
+    assert.notEqual(matched!.listId, INBOX_LIST_ID, 'punctuated tag still matches');
   });
 
   await test('pin: the toolbar pin and setPriority without a date get today', async () => {
