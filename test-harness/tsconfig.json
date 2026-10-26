@@ -10,7 +10,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["../src/*"],
-      
+
       "react-native": ["./stubs/react-native.ts"],
       "expo-constants": ["./stubs/expo-constants.ts"],
       "expo-notifications": ["./stubs/expo-notifications.ts"],
