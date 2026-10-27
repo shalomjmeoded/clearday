@@ -80,13 +80,18 @@ export function ReminderTimePicker({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
         <Pressable
           style={[styles.sheet, { backgroundColor: tokens.background, paddingBottom: sheetBottomPadding }]}
           onPress={(e) => e.stopPropagation()}
+          accessible={false}
+          onAccessibilityEscape={onClose}
         >
           <View style={[styles.handle, { backgroundColor: tokens.border }]} />
-          <Text style={[typography.screenTitle, styles.title, { color: tokens.text }]}>
+          <Text
+            style={[typography.screenTitle, styles.title, { color: tokens.text }]}
+            accessibilityRole="header"
+          >
             Reminder time
           </Text>
           <Text style={[typography.heroTitle, styles.preview, { color: tokens.accent }]}>
@@ -119,6 +124,11 @@ export function ReminderTimePicker({
                         setHours(h);
                         hourRef.current?.scrollTo({ y: h * ROW_HEIGHT, animated: true });
                       }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: active }}
+                      // Naming the unit is what keeps the two columns apart;
+                      // both otherwise read as bare numbers.
+                      accessibilityLabel={`${h} hours`}
                       style={[styles.cell, active && { backgroundColor: tokens.accentSoft }]}
                     >
                       <Text
@@ -167,6 +177,9 @@ export function ReminderTimePicker({
                         setMinutes(m);
                         minuteRef.current?.scrollTo({ y: m * ROW_HEIGHT, animated: true });
                       }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: active }}
+                      accessibilityLabel={`${m} minutes`}
                       style={[styles.cell, active && { backgroundColor: tokens.accentSoft }]}
                     >
                       <Text
@@ -191,11 +204,13 @@ export function ReminderTimePicker({
 
           <Pressable
             onPress={confirm}
+            accessibilityRole="button"
+            accessibilityLabel={`Done, ${preview}`}
             style={[styles.doneBtn, { backgroundColor: tokens.accent }]}
           >
             <Text style={[typography.button, { color: tokens.onAccent }]}>Done</Text>
           </Pressable>
-          <Pressable onPress={onClose} style={styles.cancel}>
+          <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
             <Text style={[typography.button, { color: tokens.mutedText }]}>Cancel</Text>
           </Pressable>
         </Pressable>

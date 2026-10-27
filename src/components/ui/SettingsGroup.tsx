@@ -14,7 +14,10 @@ export function SettingsGroup({
 
   return (
     <View style={[styles.wrap, style]}>
-      <Text style={[typography.caption, styles.label, { color: tokens.mutedText }]}>
+      <Text
+        style={[typography.caption, styles.label, { color: tokens.mutedText }]}
+        accessibilityRole="header"
+      >
         {title}
       </Text>
       <View
@@ -37,6 +40,7 @@ export function SettingsRow({
   valueMuted,
   disabled,
   last,
+  toggle,
 }: {
   label: string;
   value?: string;
@@ -46,6 +50,12 @@ export function SettingsRow({
   valueMuted?: boolean;
   disabled?: boolean;
   last?: boolean;
+  /**
+   * Present when the row is really an on/off switch rendered as a row, so it
+   * announces as one rather than as a button whose state you have to infer
+   * from the trailing "On"/"Off".
+   */
+  toggle?: boolean;
 }) {
   const { tokens } = useTheme();
   const content = (
@@ -88,6 +98,11 @@ export function SettingsRow({
     <Pressable
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
+      accessibilityRole={toggle === undefined ? 'button' : 'switch'}
+      accessibilityState={toggle === undefined ? undefined : { checked: toggle }}
+      // A switch states its own on/off, so the trailing value Text would
+      // otherwise be announced twice ("Haptics On, on").
+      accessibilityLabel={toggle === undefined ? undefined : label}
       style={({ pressed }) => [
         styles.row,
         !last && { borderBottomColor: tokens.border, borderBottomWidth: StyleSheet.hairlineWidth },
@@ -112,13 +127,18 @@ export function SettingsChips<T extends string>({
   const { tokens } = useTheme();
 
   return (
-    <View style={styles.chips}>
+    <View style={styles.chips} accessibilityRole="radiogroup">
       {options.map((opt) => {
         const active = opt.key === value;
         return (
           <Pressable
             key={opt.key}
             onPress={() => onChange(opt.key)}
+            // One of a set; the active chip is otherwise only an accent fill.
+            // `checked` rather than `selected`: it is what drives
+            // RadioButton.setChecked on Android, and iOS reads it out too.
+            accessibilityRole="radio"
+            accessibilityState={{ checked: active }}
             style={[
               styles.chip,
               {

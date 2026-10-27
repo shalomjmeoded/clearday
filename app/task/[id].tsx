@@ -422,7 +422,12 @@ export default function TaskDetailScreen() {
   if (!loaded) {
     return (
       <FormScreen modalHeader>
-        <View style={styles.loadingPane}>
+        <View
+          style={styles.loadingPane}
+          accessible
+          accessibilityRole="progressbar"
+          accessibilityLabel="Loading task"
+        >
           <ActivityIndicator color={tokens.accent} />
         </View>
       </FormScreen>
@@ -436,7 +441,11 @@ export default function TaskDetailScreen() {
           <Text style={[typography.body, { color: tokens.mutedText, marginBottom: spacing.lg }]}>
             This task is no longer here.
           </Text>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            accessibilityRole="button"
+          >
             <Text style={[typography.button, { color: tokens.accent }]}>Go back</Text>
           </Pressable>
         </Screen>
@@ -471,13 +480,21 @@ export default function TaskDetailScreen() {
           multiline
         />
 
-        <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+        <Text
+          accessibilityRole="header"
+          style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}
+        >
           PRIORITY · {PRIORITIES.find((p) => p.key === priority)?.label ?? 'Normal'}
         </Text>
-        <View style={styles.row}>
+        <View style={styles.row} accessibilityRole="radiogroup">
           {PRIORITIES.map((p) => (
             <Pressable
               key={p.key}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: priority === p.key }}
+              // Some priorities carry a leading icon; an explicit label keeps
+              // the glyph out of the spoken name.
+              accessibilityLabel={p.label}
               onPress={async () => {
                 Keyboard.dismiss();
                 if (p.key === priority) return;
@@ -523,10 +540,13 @@ export default function TaskDetailScreen() {
           ))}
         </View>
 
-        <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+        <Text
+          accessibilityRole="header"
+          style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}
+        >
           COLOR
         </Text>
-        <View style={styles.swatches}>
+        <View style={styles.swatches} accessibilityRole="radiogroup">
           <Pressable
             onPress={async () => {
               Keyboard.dismiss();
@@ -534,6 +554,12 @@ export default function TaskDetailScreen() {
               setColor(undefined);
               await persist({ color: undefined });
             }}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: !color }}
+            accessibilityLabel="Automatic color"
+            // 36pt + 4pt of slop reaches the 44pt guideline. The grid gap is
+            // 8pt, so the slop meets its neighbour's without overlapping it.
+            hitSlop={4}
             style={[
               styles.noColorSwatch,
               {
@@ -553,8 +579,12 @@ export default function TaskDetailScreen() {
                 setColor(item.value);
                 await persist({ color: item.value });
               }}
-              accessibilityRole="button"
-              accessibilityLabel={`Choose ${item.label}`}
+              // The swatch has no text at all — colour is the only visual cue,
+              // so the name and the selected state both have to be spoken.
+              accessibilityRole="radio"
+              accessibilityState={{ checked: color === item.value }}
+              accessibilityLabel={item.label}
+              hitSlop={4}
               style={[
                 styles.swatch,
                 {
@@ -567,14 +597,19 @@ export default function TaskDetailScreen() {
           ))}
         </View>
 
-        <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+        <Text
+          accessibilityRole="header"
+          style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}
+        >
           LIST
         </Text>
-        <View style={styles.row}>
+        <View style={styles.row} accessibilityRole="radiogroup">
           {lists.map((list) => (
             <Pressable
               key={list.id}
               onPress={() => moveTaskToList(list.id)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: listId === list.id }}
               style={[
                 styles.chip,
                 {
@@ -598,7 +633,10 @@ export default function TaskDetailScreen() {
 
         {task.status === 'active' && (
           <>
-            <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+            <Text
+              accessibilityRole="header"
+              style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}
+            >
               SCHEDULE
             </Text>
             {dueDate ? (
@@ -609,12 +647,14 @@ export default function TaskDetailScreen() {
             <View style={styles.row}>
               <Pressable
                 onPress={scheduleTomorrow}
+                accessibilityRole="button"
                 style={[styles.chip, { borderColor: tokens.border, backgroundColor: tokens.card }]}
               >
                 <Text style={[typography.chip, { color: tokens.text }]}>Tomorrow</Text>
               </Pressable>
               <Pressable
                 onPress={pickDate}
+                accessibilityRole="button"
                 style={[styles.chip, { borderColor: tokens.accent, backgroundColor: tokens.card }]}
               >
                 <Text style={[typography.chip, { color: tokens.accent }]}>Choose date</Text>
@@ -622,6 +662,7 @@ export default function TaskDetailScreen() {
               {dueDate && !isRecurring(recurrence) ? (
                 <Pressable
                   onPress={clearDueDate}
+                  accessibilityRole="button"
                   style={[styles.chip, { borderColor: tokens.border, backgroundColor: tokens.card }]}
                 >
                   <Text style={[typography.chip, { color: tokens.mutedText }]}>Clear date</Text>
@@ -629,11 +670,24 @@ export default function TaskDetailScreen() {
               ) : null}
             </View>
 
-            <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+            <Text
+              accessibilityRole="header"
+              style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}
+            >
               REMINDER
             </Text>
             <Pressable
               onPress={openReminderPicker}
+              accessibilityRole="button"
+              accessibilityLabel={
+                reminderAt
+                  ? `Reminder: ${
+                      reminderShowsDay
+                        ? `${formatDisplayDate(reminderAt)} at ${formatTime(reminderAt)}`
+                        : formatTime(reminderAt)
+                    }`
+                  : 'Set a reminder time'
+              }
               style={[styles.reminderBtn, { borderColor: tokens.border }]}
             >
               <Text style={[typography.body, { color: tokens.text }]}>
@@ -651,18 +705,27 @@ export default function TaskDetailScreen() {
               </Text>
             ) : null}
             {reminderAt ? (
-              <Pressable onPress={removeReminder} style={styles.removeReminder}>
+              <Pressable
+                onPress={removeReminder}
+                accessibilityRole="button"
+                style={styles.removeReminder}
+              >
                 <Text style={[typography.meta, { color: tokens.danger }]}>Remove reminder</Text>
               </Pressable>
             ) : null}
 
-            <Text style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}>
+            <Text
+              accessibilityRole="header"
+              style={[typography.caption, styles.sectionLabel, { color: tokens.mutedText }]}
+            >
               REPEAT · {formatRecurrenceLabel(recurrence)}
             </Text>
-            <View style={styles.row}>
+            <View style={styles.row} accessibilityRole="radiogroup">
               {RECURRENCE_OPTIONS.map((option) => (
                 <Pressable
                   key={option.key}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: recurrence === option.key }}
                   onPress={async () => {
                     Keyboard.dismiss();
                     if (option.key !== 'none' && !isPro) {

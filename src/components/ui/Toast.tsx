@@ -11,6 +11,7 @@ import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
 import { triggerLightHaptic } from '@/utils/haptics';
+import { announce, useAccessibleTimeout } from '@/utils/accessibility';
 
 /**
  * On iOS a native modal screen is presented above the whole React root, so a
@@ -36,11 +37,27 @@ export function Toast() {
   const toast = useToastStore((s) => s.toast);
   const dismiss = useToastStore((s) => s.dismiss);
 
+  // An Undo that disappears on a 5s visual timer is unusable to anyone who
+  // has to hear the message first, then find the button.
+  const duration = useAccessibleTimeout(toast?.duration ?? 0, {
+    extendForScreenReader: Boolean(toast?.action),
+  });
+
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => dismiss(toast.id), toast.duration);
+    const timer = setTimeout(() => dismiss(toast.id), duration);
     return () => clearTimeout(timer);
-  }, [toast, dismiss]);
+  }, [toast, dismiss, duration]);
+
+  // The toast is never focused, so without this it is silent.
+  useEffect(() => {
+    if (!toast) return;
+    announce(
+      toast.action
+        ? `${toast.message}. ${toast.action.label} available.`
+        : toast.message
+    );
+  }, [toast]);
 
   if (!toast) return null;
 
@@ -71,7 +88,11 @@ export function Toast() {
           <Pressable
             onPress={() => dismiss(toast.id)}
             style={styles.message}
-            accessibilityRole="text"
+            // It dismisses the toast — and with it any Undo — so it is a
+            // button, not the static text it used to claim to be.
+            accessibilityRole="button"
+            accessibilityLabel={toast.message}
+            accessibilityHint="Dismisses this message"
           >
             <Text
               style={[typography.body, { color: tokens.text }]}

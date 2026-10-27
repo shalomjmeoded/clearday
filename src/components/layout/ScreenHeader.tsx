@@ -15,7 +15,10 @@ export function ScreenHeader({
   return (
     <View style={[styles.wrap, style]}>
       <View style={styles.text}>
-        <Text style={[typography.screenTitle, { color: tokens.text }]}>
+        <Text
+          style={[typography.screenTitle, { color: tokens.text }]}
+          accessibilityRole="header"
+        >
           {title}
         </Text>
         {subtitle ? (

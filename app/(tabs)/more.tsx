@@ -26,6 +26,7 @@ function LinkRow({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       style={({ pressed }) => [
         styles.link,
         !last && {

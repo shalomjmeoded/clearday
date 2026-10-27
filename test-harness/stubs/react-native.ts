@@ -39,6 +39,28 @@ export const Alert = {
 
 export const Platform = { OS: 'ios' as const };
 
+export const announcementLog: { message: string; queued: boolean }[] = [];
+
+export function __clearAnnouncements(): void {
+  announcementLog.length = 0;
+}
+
+export const AccessibilityInfo = {
+  announceForAccessibility(message: string): void {
+    announcementLog.push({ message, queued: false });
+  },
+  announceForAccessibilityWithOptions(
+    message: string,
+    options?: { queue?: boolean }
+  ): void {
+    announcementLog.push({ message, queued: Boolean(options?.queue) });
+  },
+  isScreenReaderEnabled: async (): Promise<boolean> => false,
+  addEventListener: (): { remove: () => void } => ({ remove: () => {} }),
+  getRecommendedTimeoutMillis: async (original: number): Promise<number> =>
+    original,
+};
+
 /** react-native-purchases probes these at import time. */
 export const NativeModules: Record<string, unknown> = {};
 

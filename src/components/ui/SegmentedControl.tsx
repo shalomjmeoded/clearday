@@ -21,7 +21,10 @@ export function SegmentedControl({ segments, value, onChange }: Props) {
   const { tokens } = useTheme();
 
   return (
-    <View style={[styles.wrap, { backgroundColor: tokens.sectionBg }]}>
+    <View
+      style={[styles.wrap, { backgroundColor: tokens.sectionBg }]}
+      accessibilityRole="tablist"
+    >
       {segments.map((seg) => {
         const active = seg.key === value;
         return (
@@ -31,6 +34,10 @@ export function SegmentedControl({ segments, value, onChange }: Props) {
               await triggerSelectionHaptic();
               onChange(seg.key);
             }}
+            // Which segment is active is otherwise conveyed by fill colour and
+            // font weight alone.
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
             style={[
               styles.segment,
               active && { backgroundColor: tokens.card },

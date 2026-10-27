@@ -11,6 +11,7 @@ import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
+import { DECORATIVE, useAnnounceOnChange } from '@/utils/accessibility';
 
 interface Props extends TextInputProps {
   label: string;
@@ -21,13 +22,23 @@ export function TextField({ label, error, style, ...props }: Props) {
   const { tokens } = useTheme();
   const [focused, setFocused] = useState(false);
 
+  // The visible caption is a sibling of the input, so on its own it would be
+  // a separate stop and the field itself would announce only its placeholder.
+  // Carrying it (and any error) on the input is the native equivalent of
+  // <label for>; the caption and error then drop out of the tree as duplicates.
+  useAnnounceOnChange(error);
+
   return (
     <View style={styles.wrap}>
-      <Text style={[typography.caption, styles.label, { color: tokens.mutedText }]}>
+      <Text
+        style={[typography.caption, styles.label, { color: tokens.mutedText }]}
+        {...DECORATIVE}
+      >
         {label.toUpperCase()}
       </Text>
       <TextInput
         {...props}
+        accessibilityLabel={error ? `${label}. Error: ${error}` : label}
         placeholderTextColor={tokens.mutedText}
         onFocus={(e) => {
           setFocused(true);
@@ -54,7 +65,9 @@ export function TextField({ label, error, style, ...props }: Props) {
         ]}
       />
       {error ? (
-        <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text>
+        <Text style={[styles.error, { color: tokens.danger }]} {...DECORATIVE}>
+          {error}
+        </Text>
       ) : null}
     </View>
   );

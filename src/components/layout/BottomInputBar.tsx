@@ -9,6 +9,7 @@ import { QuickTimePicker } from '@/components/tasks/QuickTimePicker';
 import { RecurrencePicker } from '@/components/tasks/RecurrencePicker';
 import { TaskColorPicker } from '@/components/tasks/TaskColorPicker';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
+import { TASK_COLORS } from '@/constants/taskColors';
 import {
   areLocalNotificationsSupported,
   requestReminderPermission,
@@ -27,6 +28,7 @@ import { tomorrowIso } from '@/utils/scheduleDates';
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import { router } from 'expo-router';
 import { triggerLightHaptic, triggerSelectionHaptic } from '@/utils/haptics';
+import { announce } from '@/utils/accessibility';
 
 import { useScreenInsets } from './useScreenInsets';
 
@@ -46,6 +48,8 @@ interface Props {
 }
 
 type DatePick = 'today' | 'tomorrow' | 'pick';
+
+const EMPTY_HINT = 'Type something to add a task.';
 
 /** Sticks above the keyboard; safe-area padding when keyboard is closed. */
 export function BottomInputBar({
@@ -129,6 +133,11 @@ export function BottomInputBar({
     }
   }, [text, isPro, lists, draftDueDate, draftReminderAt, draftRecurrence, draftPinned]);
 
+  const draftColorName = useMemo(
+    () => TASK_COLORS.find((item) => item.value === draftColor)?.label,
+    [draftColor]
+  );
+
   const hasDraftContent =
     Boolean(text.trim()) ||
     draftDatePick != null ||
@@ -202,6 +211,9 @@ export function BottomInputBar({
     const trimmed = text.trim();
     if (!trimmed) {
       setEmptyHint(true);
+      // The hint appears below an input that keeps focus, so nothing would
+      // speak it otherwise.
+      announce(EMPTY_HINT);
       return;
     }
     setEmptyHint(false);
@@ -360,42 +372,62 @@ export function BottomInputBar({
         >
           <ToolbarBtn
             icon="calendar-outline"
+            a11yLabel={
+              draftDatePick === 'pick' && draftDueDate
+                ? `Date: ${formatDisplayDate(draftDueDate)}`
+                : 'Pick a date'
+            }
             active={draftDatePick === 'pick'}
             onPress={openCalendar}
             tokens={tokens}
           />
           <ToolbarBtn
             label="Today"
+            a11yLabel="Due today"
             active={draftDatePick === 'today'}
             onPress={setToday}
             tokens={tokens}
           />
           <ToolbarBtn
             label="Tmrw"
+            // The visible label is abbreviated to fit; the spoken one is not.
+            a11yLabel="Due tomorrow"
             active={draftDatePick === 'tomorrow'}
             onPress={setTomorrow}
             tokens={tokens}
           />
           <ToolbarBtn
             icon="time-outline"
+            a11yLabel={
+              draftReminderAt
+                ? `Reminder: ${formatTime(draftReminderAt)}`
+                : 'Set a reminder time'
+            }
             active={Boolean(draftReminderAt)}
             onPress={openTime}
             tokens={tokens}
           />
           <ToolbarBtn
             icon="pin-outline"
+            a11yLabel="Pin to today"
             active={draftPinned}
             onPress={togglePin}
             tokens={tokens}
           />
           <ToolbarBtn
             icon="repeat-outline"
+            a11yLabel={
+              isRecurring(draftRecurrence)
+                ? `Repeats ${formatRecurrenceLabel(draftRecurrence).toLowerCase()}`
+                : 'Repeat'
+            }
             active={isRecurring(draftRecurrence)}
             onPress={openRecurrence}
             tokens={tokens}
           />
           <ToolbarBtn
             icon="color-palette-outline"
+            a11yLabel={draftColorName ? `Color: ${draftColorName}` : 'Pick a color'}
             active={draftColor != null && draftColor !== undefined}
             onPress={openColor}
             tokens={tokens}
@@ -485,9 +517,7 @@ export function BottomInputBar({
         ) : null}
       </View>
       {emptyHint ? (
-        <Text style={[styles.hint, { color: tokens.mutedText }]}>
-          Type something to add a task.
-        </Text>
+        <Text style={[styles.hint, { color: tokens.mutedText }]}>{EMPTY_HINT}</Text>
       ) : parsedHint ? (
         <Text style={[styles.hint, { color: tokens.accent }]} numberOfLines={1}>
           {parsedHint}
@@ -544,6 +574,7 @@ export function BottomInputBar({
 function ToolbarBtn({
   icon,
   label,
+  a11yLabel,
   active,
   onPress,
   tokens,
@@ -551,6 +582,13 @@ function ToolbarBtn({
 }: {
   icon?: keyof typeof Ionicons.glyphMap;
   label?: string;
+  /**
+   * Spoken name. Required: most of these buttons are icon-only, and an
+   * Ionicons glyph is a private-use character a screen reader cannot read.
+   * Carries the current value too, since the on/off state alone ("Repeats",
+   * checked) does not say what it repeats as.
+   */
+  a11yLabel: string;
   active?: boolean;
   onPress: () => void;
   tokens: ReturnType<typeof useTheme>['tokens'];
@@ -559,6 +597,9 @@ function ToolbarBtn({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="togglebutton"
+      accessibilityState={{ checked: Boolean(active) }}
+      accessibilityLabel={a11yLabel}
       style={({ pressed }) => [
         styles.toolBtn,
         {
@@ -567,7 +608,7 @@ function ToolbarBtn({
         },
         pressed && { opacity: 0.8 },
       ]}
-      hitSlop={4}
+      hitSlop={2}
     >
       {icon ? (
         <Ionicons
@@ -619,8 +660,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   toolBtn: {
-    minHeight: 34,
-    minWidth: 38,
+    // 40pt + 2pt of slop on every side reaches 44x44. The row gap is 4pt, so
+    // 2pt is the most each side can take without neighbouring hit areas
+    // overlapping — the previous slop of 4 overlapped by 4pt, which handed
+    // taps in the gap to whichever button sat later in the row.
+    minHeight: 40,
+    minWidth: 40,
     paddingHorizontal: spacing.xs + 2,
     borderRadius: radius.sm,
     borderWidth: StyleSheet.hairlineWidth,

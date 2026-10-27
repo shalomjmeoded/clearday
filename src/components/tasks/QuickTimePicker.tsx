@@ -76,19 +76,28 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
   return (
     <>
       <Modal visible={visible && !showCustom} animationType="slide" transparent onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
           <Pressable
             style={[styles.sheet, { backgroundColor: tokens.background, paddingBottom: sheetBottomPadding }]}
             onPress={(e) => e.stopPropagation()}
+            accessible={false}
+            onAccessibilityEscape={onClose}
           >
             <View style={[styles.handle, { backgroundColor: tokens.border }]} />
-            <Text style={[typography.screenTitle, styles.title, { color: tokens.text }]}>
+            <Text
+              style={[typography.screenTitle, styles.title, { color: tokens.text }]}
+              accessibilityRole="header"
+            >
               Reminder
             </Text>
             {presets.map((preset) => (
               <Pressable
                 key={preset.label}
                 onPress={() => applyTime(preset.hours, preset.minutes)}
+                accessibilityRole="button"
+                accessibilityLabel={`${preset.label}, ${formatTimeKeyLabel(
+                  formatTimeKey(preset.hours, preset.minutes)
+                )}`}
                 style={({ pressed }) => [
                   styles.row,
                   { borderBottomColor: tokens.border },
@@ -103,6 +112,7 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
             ))}
             <Pressable
               onPress={openCustom}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.row,
                 { borderBottomColor: tokens.border },
@@ -111,7 +121,7 @@ export function QuickTimePicker({ visible, dueDate, onClose, onSelect }: Props) 
             >
               <Text style={[typography.body, { color: tokens.accent }]}>Custom time</Text>
             </Pressable>
-            <Pressable onPress={onClose} style={styles.cancel}>
+            <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
               <Text style={[typography.button, { color: tokens.mutedText }]}>Cancel</Text>
             </Pressable>
           </Pressable>

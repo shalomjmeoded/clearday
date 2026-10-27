@@ -82,10 +82,12 @@ export function CalendarDatePicker({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
         <Pressable
           style={[styles.sheet, { backgroundColor: tokens.background, paddingBottom: sheetBottomPadding }]}
           onPress={(e) => e.stopPropagation()}
+          accessible={false}
+          onAccessibilityEscape={onClose}
         >
           <View style={[styles.handle, { backgroundColor: tokens.border }]} />
           <View style={styles.headerRow}>
@@ -98,7 +100,10 @@ export function CalendarDatePicker({
             >
               <Ionicons name="chevron-back" size={20} color={tokens.accent} />
             </Pressable>
-            <Text style={[typography.screenTitle, styles.monthTitle, { color: tokens.text }]}>
+            <Text
+              style={[typography.screenTitle, styles.monthTitle, { color: tokens.text }]}
+              accessibilityRole="header"
+            >
               {format(viewMonth, 'MMMM yyyy')}
             </Text>
             <Pressable
@@ -112,7 +117,13 @@ export function CalendarDatePicker({
             </Pressable>
           </View>
 
-          <View style={styles.weekdayRow}>
+          {/* Seven one-letter stops that say nothing on their own; each day
+              cell now speaks its own weekday. */}
+          <View
+            style={styles.weekdayRow}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((label, index) => (
               <Text
                 key={`${label}-${index}`}
@@ -138,6 +149,16 @@ export function CalendarDatePicker({
                       if (canSelect) void pickDay(day);
                     }}
                     disabled={!canSelect}
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      selected: isSelected && canSelect,
+                      disabled: !canSelect,
+                    }}
+                    // The cell renders a bare day number, which says nothing
+                    // out of context in a 42-cell grid.
+                    accessibilityLabel={`${format(day, 'EEEE, MMMM d')}${
+                      isToday ? ', today' : ''
+                    }`}
                     style={[
                       styles.dayCell,
                       isSelected && canSelect && { backgroundColor: tokens.accent },
@@ -171,7 +192,7 @@ export function CalendarDatePicker({
             </View>
           ))}
 
-          <Pressable onPress={onClose} style={styles.cancel}>
+          <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
             <Text style={[typography.button, { color: tokens.mutedText }]}>Cancel</Text>
           </Pressable>
         </Pressable>
@@ -227,7 +248,9 @@ const styles = StyleSheet.create({
   },
   dayCell: {
     flex: 1,
-    minHeight: 38,
+    // Full 44pt rather than hitSlop: rows are only 2pt apart, so slop would
+    // overlap the row above and below and could select the wrong date.
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.sm,

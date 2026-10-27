@@ -36,13 +36,18 @@ export function RecurrencePicker({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
         <Pressable
           style={[styles.sheet, { backgroundColor: tokens.background, paddingBottom: sheetBottomPadding }]}
           onPress={(e) => e.stopPropagation()}
+          accessible={false}
+          onAccessibilityEscape={onClose}
         >
           <View style={[styles.handle, { backgroundColor: tokens.border }]} />
-          <Text style={[typography.screenTitle, styles.title, { color: tokens.text }]}>
+          <Text
+            style={[typography.screenTitle, styles.title, { color: tokens.text }]}
+            accessibilityRole="header"
+          >
             Repeat
           </Text>
           {RECURRENCE_OPTIONS.map((option) => {
@@ -51,6 +56,11 @@ export function RecurrencePicker({
               <Pressable
                 key={option.key}
                 onPress={() => choose(option.key)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active }}
+                // Explicit, so the checkmark glyph on the active row cannot
+                // leak into the label derived from children.
+                accessibilityLabel={option.label}
                 style={({ pressed }) => [
                   styles.row,
                   { borderBottomColor: tokens.border },
@@ -71,7 +81,7 @@ export function RecurrencePicker({
               </Pressable>
             );
           })}
-          <Pressable onPress={onClose} style={styles.cancel}>
+          <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
             <Text style={[typography.button, { color: tokens.mutedText }]}>Cancel</Text>
           </Pressable>
         </Pressable>

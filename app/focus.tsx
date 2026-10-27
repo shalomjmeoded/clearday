@@ -17,6 +17,7 @@ import {
   triggerSuccessHaptic,
   triggerSoftHaptic,
 } from '@/utils/haptics';
+import { useAnnounceOnChange } from '@/utils/accessibility';
 
 const FOCUS_KEEP_AWAKE_TAG = 'clearday-focus';
 
@@ -50,6 +51,13 @@ export default function FocusScreen() {
     ? todayTasks.filter((t) => selectedIds.includes(t.id))
     : todayTasks;
 
+  const pickHint =
+    selectedIds.length === 0
+      ? `Pick up to ${MAX_FOCUS} tasks for today.`
+      : `${selectedIds.length} of ${MAX_FOCUS} picked.`;
+  // The running count sits in a label nothing moves focus to.
+  useAnnounceOnChange(active ? undefined : pickHint);
+
   const handleStart = async () => {
     await triggerMediumHaptic();
     startFocus();
@@ -72,10 +80,13 @@ export default function FocusScreen() {
       <Screen variant="stack" edges={['top', 'bottom']} style={styles.screen}>
         <FocusKeepAwake />
         <View style={styles.header}>
-          <Text style={[typography.screenTitle, { color: tokens.text }]}>
+          <Text
+            style={[typography.screenTitle, { color: tokens.text }]}
+            accessibilityRole="header"
+          >
             Focus
           </Text>
-          <Pressable onPress={handleExit} hitSlop={12}>
+          <Pressable onPress={handleExit} hitSlop={12} accessibilityRole="button">
             <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
               Exit
             </Text>
@@ -99,6 +110,7 @@ export default function FocusScreen() {
                 <TaskCheckbox
                   checked={false}
                   priority={task.priority}
+                  accessibilityLabel={task.title}
                   onPress={async () => {
                     await triggerSuccessHaptic();
                     await completeTask(task.id);
@@ -126,20 +138,22 @@ export default function FocusScreen() {
             router.back();
           }}
           hitSlop={12}
+          accessibilityRole="button"
         >
           <Text style={[typography.button, { color: tokens.accent, fontSize: 15 }]}>
             Cancel
           </Text>
         </Pressable>
-        <Text style={[typography.screenTitle, { color: tokens.text }]}>
+        <Text
+          style={[typography.screenTitle, { color: tokens.text }]}
+          accessibilityRole="header"
+        >
           Choose focus
         </Text>
         <View style={styles.headerSpacer} />
       </View>
       <Text style={[typography.body, styles.hint, { color: tokens.mutedText }]}>
-        {selectedIds.length === 0
-          ? `Pick up to ${MAX_FOCUS} tasks for today.`
-          : `${selectedIds.length} of ${MAX_FOCUS} picked.`}
+        {pickHint}
       </Text>
       <ScrollView
         style={{ flex: 1, backgroundColor: tokens.background }}
@@ -154,7 +168,10 @@ export default function FocusScreen() {
               key={task.id}
               onPress={() => handleToggle(task.id)}
               disabled={atLimit}
-              accessibilityState={{ selected, disabled: atLimit }}
+              // Multi-select up to a limit: a checkbox, not a radio. The
+              // filled circle is otherwise the only cue.
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: selected, disabled: atLimit }}
               style={({ pressed }) => [
                 styles.pickRow,
                 { borderBottomColor: tokens.border },
@@ -181,6 +198,8 @@ export default function FocusScreen() {
       <Pressable
         onPress={handleStart}
         disabled={selectedIds.length === 0}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: selectedIds.length === 0 }}
         style={({ pressed }) => [
           styles.startBtn,
           {

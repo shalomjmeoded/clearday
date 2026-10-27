@@ -16,11 +16,21 @@ interface Props {
   checked: boolean;
   priority: TaskPriority;
   onPress: () => void;
+  /**
+   * What this checkbox is for — usually the task title. Required because the
+   * control is icon-only and has nothing else to announce.
+   */
+  accessibilityLabel: string;
 }
 
 const SPRING = { damping: 14, stiffness: 220 };
 
-export function TaskCheckbox({ checked, priority, onPress }: Props) {
+export function TaskCheckbox({
+  checked,
+  priority,
+  onPress,
+  accessibilityLabel,
+}: Props) {
   const { tokens } = useTheme();
   const scale = useSharedValue(1);
   const progress = useSharedValue(checked ? 1 : 0);
@@ -58,7 +68,14 @@ export function TaskCheckbox({ checked, priority, onPress }: Props) {
   const showDot = priority === 'important' && !checked;
 
   return (
-    <Pressable onPress={handlePress} hitSlop={14} style={styles.hit}>
+    <Pressable
+      onPress={handlePress}
+      hitSlop={14}
+      style={styles.hit}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={accessibilityLabel}
+    >
       <Animated.View style={[styles.box, boxStyle]}>
         <Animated.View
           style={[

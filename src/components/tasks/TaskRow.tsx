@@ -1,5 +1,11 @@
-import React, { useCallback, useEffect, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type AccessibilityActionEvent,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   FadeInDown,
@@ -16,15 +22,11 @@ import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
-import { formatDisplayDate, formatTime, isToday } from '@/utils/dates';
 import { formatTaskSideDate } from '@/utils/formatTaskSideDate';
 import { formatRecurrenceLabel, isRecurring } from '@/utils/recurrence';
-import {
-  effectiveReminderAt,
-  isReminderOnDifferentDay,
-  isReminderPast,
-} from '@/utils/reminderTime';
 import { triggerSoftHaptic } from '@/utils/haptics';
+import { DECORATIVE } from '@/utils/accessibility';
+import { describeTaskRow, taskReminderDisplay } from '@/utils/taskAccessibility';
 
 const SWIPE_ACTIVE_OFFSET_X: [number, number] = [-10, 10];
 const SWIPE_FAIL_OFFSET_Y: [number, number] = [-20, 20];
@@ -40,6 +42,12 @@ interface Props {
   onPin: () => void;
   onToggleRecurring: () => void;
   onDragActivate?: () => void;
+  /**
+   * Reorder one slot up/down. Drag-and-drop is unreachable with a screen
+   * reader, so these back the "Move up"/"Move down" accessibility actions.
+   */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
   isDragging?: boolean;
   swipeEnabled?: boolean;
   compact?: boolean;
@@ -58,6 +66,8 @@ function TaskRowInner({
   onPin,
   onToggleRecurring,
   onDragActivate,
+  onMoveUp,
+  onMoveDown,
   isDragging = false,
   swipeEnabled = true,
   compact = false,
@@ -76,20 +86,91 @@ function TaskRowInner({
   const dragEnabled = Boolean(onDragActivate) && !completed;
   const showPriorityMarker =
     task.priority === 'important' || task.priority === 'must_do_today';
-  // The row shows when the alert will actually ring, so a snoozed reminder
-  // reads as its pushed-out time rather than as already passed.
-  const reminderAt = effectiveReminderAt(task);
-  // A reminder that already went by (or was never in the future) is shown struck through.
-  const reminderPast = !completed && isReminderPast(reminderAt);
-  // Name the day only when the time alone would be ambiguous.
-  const reminderNeedsDay = task.dueDate
-    ? isReminderOnDifferentDay(reminderAt, task.dueDate)
-    : Boolean(reminderAt) && !isToday(reminderAt);
-  const reminderLabel = reminderAt
-    ? reminderNeedsDay
-      ? `${formatDisplayDate(reminderAt)} ${formatTime(reminderAt)}`
-      : formatTime(reminderAt)
-    : '';
+  // Shared with the accessibility label below, so the spoken reminder and the
+  // visible one cannot drift apart.
+  const { label: reminderLabel, isPast: reminderPast } =
+    taskReminderDisplay(task);
+
+  // The row is one accessibility element: its children collapse into this
+  // label, so anything left out here is invisible to a screen reader.
+  const accessibilityLabel = useMemo(
+    () => describeTaskRow(task, { listName, restoreMode }),
+    [task, listName, restoreMode]
+  );
+
+  // Mirrors the swipe rails and the drag handle, neither of which a screen
+  // reader can reach. Surfaces in the VoiceOver actions rotor / TalkBack menu.
+  const accessibilityActions = useMemo(() => {
+    const actions: { name: string; label: string }[] = [
+      {
+        name: 'completeTask',
+        label: restoreMode
+          ? 'Restore task'
+          : completed
+            ? 'Mark as to-do'
+            : 'Mark done',
+      },
+    ];
+    if (!completed) {
+      actions.push({
+        name: 'toggleRepeat',
+        label: isRecurring(task.recurrence) ? 'Stop repeating' : 'Repeat task',
+      });
+    }
+    actions.push({
+      name: 'togglePin',
+      label: task.priority === 'important' ? 'Unstar task' : 'Star task',
+    });
+    actions.push({ name: 'archiveTask', label: 'Archive task' });
+    actions.push({ name: 'deleteTask', label: 'Delete task' });
+    if (onMoveUp) actions.push({ name: 'moveUp', label: 'Move up' });
+    if (onMoveDown) actions.push({ name: 'moveDown', label: 'Move down' });
+    return actions;
+  }, [
+    completed,
+    onMoveDown,
+    onMoveUp,
+    restoreMode,
+    task.priority,
+    task.recurrence,
+  ]);
+
+  const handleAccessibilityAction = useCallback(
+    (event: AccessibilityActionEvent) => {
+      switch (event.nativeEvent.actionName) {
+        case 'completeTask':
+          onComplete();
+          break;
+        case 'toggleRepeat':
+          onToggleRecurring();
+          break;
+        case 'togglePin':
+          onPin();
+          break;
+        case 'archiveTask':
+          onArchive();
+          break;
+        case 'deleteTask':
+          onDelete();
+          break;
+        case 'moveUp':
+          onMoveUp?.();
+          break;
+        case 'moveDown':
+          onMoveDown?.();
+          break;
+      }
+    },
+    [
+      onArchive,
+      onComplete,
+      onDelete,
+      onMoveDown,
+      onMoveUp,
+      onPin,
+      onToggleRecurring,
+    ]
+  );
 
   const openTask = useCallback(() => {
     if (isDragging) return;
@@ -268,7 +349,14 @@ function TaskRowInner({
       disabled={isDragging}
       style={styles.content}
       accessibilityRole="button"
-      accessibilityLabel={`Task: ${task.title}`}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint="Opens task details"
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={handleAccessibilityAction}
+      // VoiceOver's activate gesture cannot produce the double tap that
+      // completes a task, and routing it through that timer would just delay
+      // opening. Send assistive activation straight to the detail screen.
+      onAccessibilityTap={openTask}
     >
       {colorMark ? (
         <View style={[styles.colorMark, { backgroundColor: colorMark }]} />
@@ -350,7 +438,9 @@ function TaskRowInner({
       {isMust ? (
         <View style={[styles.mustBar, { backgroundColor: tokens.accent }]} />
       ) : null}
-      <View style={styles.dateColumn}>
+      {/* The due date is spoken as part of the row label, so the column
+          itself would only add a duplicate stop. */}
+      <View style={styles.dateColumn} {...DECORATIVE}>
         <Text
           style={[
             typography.meta,
@@ -378,8 +468,10 @@ function TaskRowInner({
             <Ionicons name="star" size={14} color={tokens.actionPin} />
           </Pressable>
         ) : showPriorityMarker ? (
-          // Pinned-to-today is shown, not toggled, here; it is cleared from task detail.
-          <View style={styles.pinButton} accessibilityLabel="Pinned to today">
+          // Pinned-to-today is shown, not toggled, here; it is cleared from task
+          // detail. The row label already says "Pinned to today", so the glyph
+          // stays out of the accessibility tree.
+          <View style={styles.pinButton} {...DECORATIVE}>
             <Ionicons name="pin" size={14} color={tokens.accent} />
           </View>
         ) : null}

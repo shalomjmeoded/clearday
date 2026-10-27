@@ -252,6 +252,7 @@ export default function SettingsScreen() {
           <SettingsRow
             label="Haptics"
             value={settings.hapticsEnabled ? 'On' : 'Off'}
+            toggle={settings.hapticsEnabled}
             onPress={() => update('hapticsEnabled', !settings.hapticsEnabled)}
             last
           />

@@ -12,6 +12,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import type { Task } from '@/types/task';
 import { triggerLightHaptic } from '@/utils/haptics';
 import { mergeTasksPreservingOrder, taskSyncKey } from '@/utils/taskSyncKey';
+import { moveByOneSlot } from '@/utils/reorder';
 
 import { CompletedSection } from './CompletedSection';
 import { TaskRow } from './TaskRow';
@@ -121,6 +122,11 @@ export function TaskList({
       : orderedTasks.length > 0
         ? orderedTasks
         : activeTasks;
+
+  // Read by the move-up/move-down accessibility actions, which fire outside
+  // the render that produced the list.
+  const draggableTasksRef = useRef(draggableTasks);
+  draggableTasksRef.current = draggableTasks;
 
   useEffect(() => {
     if (reorderMode) {
@@ -244,22 +250,23 @@ export function TaskList({
   );
 
   const renderTaskRow = useCallback(
-    (
-      item: Task,
-      compact = false,
-      drag?: () => void,
-      isDragging = false,
-      swipeEnabled = true
-    ) => (
-      <TaskRow
-        {...buildRowProps(item, compact)}
-        onDragActivate={drag}
-        isDragging={isDragging}
-        swipeEnabled={swipeEnabled}
-      />
-    ),
+    (item: Task, compact = false) => <TaskRow {...buildRowProps(item, compact)} />,
     [buildRowProps]
   );
+
+  /**
+   * Reorder by one slot. Drag-and-drop is the only way to sort by touch, and
+   * it is unreachable with a screen reader, so this backs the row's
+   * "Move up"/"Move down" accessibility actions.
+   */
+  const moveTaskBy = useCallback((taskId: string, delta: number) => {
+    const next = moveByOneSlot(draggableTasksRef.current, taskId, delta);
+    if (!next) return;
+
+    void triggerLightHaptic();
+    setManualSortTasks(next);
+    onReorderRef.current?.(next.map((task) => task.id));
+  }, []);
 
   const completedFooter = useMemo(
     () => (
@@ -317,9 +324,30 @@ export function TaskList({
   );
 
   const renderDraggableItem = useCallback(
-    ({ item, drag, isActive }: RenderItemParams<Task>) =>
-      renderTaskRow(item, false, drag, isActive, true),
-    [renderTaskRow]
+    ({ item, drag, isActive, getIndex }: RenderItemParams<Task>) => {
+      const index = getIndex();
+      const total = draggableTasksRef.current.length;
+      return (
+        <TaskRow
+          {...buildRowProps(item)}
+          onDragActivate={drag}
+          isDragging={isActive}
+          // Offered only where the move is possible, so the rotor never lists
+          // an action that would do nothing.
+          onMoveUp={
+            index !== undefined && index > 0
+              ? () => moveTaskBy(item.id, -1)
+              : undefined
+          }
+          onMoveDown={
+            index !== undefined && index < total - 1
+              ? () => moveTaskBy(item.id, 1)
+              : undefined
+          }
+        />
+      );
+    },
+    [buildRowProps, moveTaskBy]
   );
 
   const handleDragEnd = useCallback(
@@ -351,7 +379,12 @@ export function TaskList({
 
   if (loading) {
     return (
-      <View style={[styles.loading, { backgroundColor: tokens.background }]}>
+      <View
+        style={[styles.loading, { backgroundColor: tokens.background }]}
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel="Loading tasks"
+      >
         <ActivityIndicator color={tokens.accent} />
       </View>
     );

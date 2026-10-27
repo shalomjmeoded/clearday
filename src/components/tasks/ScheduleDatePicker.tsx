@@ -18,13 +18,20 @@ export function ScheduleDatePicker({ visible, onClose, onSelect }: Props) {
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
         <Pressable
           style={[styles.sheet, { backgroundColor: tokens.background }]}
           onPress={(e) => e.stopPropagation()}
+          // Without this the sheet is one accessibility element and nothing
+          // inside it can be reached.
+          accessible={false}
+          onAccessibilityEscape={onClose}
         >
           <View style={[styles.handle, { backgroundColor: tokens.border }]} />
-          <Text style={[typography.screenTitle, styles.title, { color: tokens.text }]}>
+          <Text
+            style={[typography.screenTitle, styles.title, { color: tokens.text }]}
+            accessibilityRole="header"
+          >
             Choose a date
           </Text>
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
@@ -35,6 +42,7 @@ export function ScheduleDatePicker({ visible, onClose, onSelect }: Props) {
                   onSelect(day.iso);
                   onClose();
                 }}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.row,
                   { borderBottomColor: tokens.border },
@@ -45,7 +53,7 @@ export function ScheduleDatePicker({ visible, onClose, onSelect }: Props) {
               </Pressable>
             ))}
           </ScrollView>
-          <Pressable onPress={onClose} style={styles.cancel}>
+          <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
             <Text style={[typography.button, { color: tokens.accent }]}>Cancel</Text>
           </Pressable>
         </Pressable>

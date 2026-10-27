@@ -21,26 +21,36 @@ export interface ThemeTokens {
   actionRead: string;
 }
 
+/*
+ * Text colours are held to WCAG AA 4.5:1 against the *darkest* surface they
+ * land on — usually `sectionBg`, not `background`. The swipe-rail colours are
+ * backgrounds for a 10px/700 label in `onAccent`, so they are held to 4.5:1
+ * too rather than the 3:1 that larger text would allow.
+ */
 export const lightTheme: ThemeTokens = {
   background: '#F6F3ED',
   card: '#FFFDF9',
   text: '#1A1917',
-  mutedText: '#7A7872',
+  // 4.54:1 on sectionBg. Carries every meta line, side date, placeholder and
+  // inactive tab, so it is small text and gets the full 4.5:1.
+  mutedText: '#6C6A65',
   border: '#E6E1D8',
   accent: '#4F6B52',
   accentSoft: '#E8EFE9',
-  danger: '#B85C4A',
+  // Used as small text (field errors, "Remove reminder") as well as the delete
+  // rail's fill, so it takes the stricter of the two requirements.
+  danger: '#974A3B',
   tabBar: '#F6F3ED',
   inputBg: '#FFFDF9',
   checkboxFill: '#4F6B52',
   swipeTomorrow: '#5A7A5E',
   // Dark enough that the white icon/label on the archive action stays legible.
-  swipeArchive: '#807C75',
+  swipeArchive: '#78746E',
   sectionBg: '#EFEBE3',
   onAccent: '#FFFDF9',
   paperLine: '#E7DCC7',
   actionEdit: '#52759A',
-  actionPin: '#B9822E',
+  actionPin: '#9A6C26',
   actionRepeat: '#5A7A5E',
   actionRead: '#766B9A',
 };
@@ -58,7 +68,8 @@ export const darkTheme: ThemeTokens = {
   inputBg: '#1A1917',
   checkboxFill: '#8FAF92',
   swipeTomorrow: '#6B8A6E',
-  swipeArchive: '#6E6C68',
+  // Light enough that the dark icon/label on the archive action stays legible.
+  swipeArchive: '#7D7A76',
   sectionBg: '#181614',
   onAccent: '#0F0E0D',
   paperLine: '#38332D',
@@ -72,49 +83,57 @@ export const lightPalettes: Record<string, ThemeTokens> = {
   classic: lightTheme,
   yellow: {
     ...lightTheme,
+    // 4.55:1 on this palette's sectionBg (#F6E7A7).
+    mutedText: '#696762',
     background: '#FFF5C9',
     card: '#FFF9DD',
     inputBg: '#FFFBE8',
     sectionBg: '#F6E7A7',
     border: '#E7D584',
     accent: '#7A6418',
-    accentSoft: '#EFE3A9',
+    accentSoft: '#F0E5AE',
     checkboxFill: '#7A6418',
     paperLine: '#E2CE75',
   },
   pink: {
     ...lightTheme,
+    // 4.53:1 on this palette's sectionBg (#F6D2DB).
+    mutedText: '#62605B',
     background: '#FFE8EE',
     card: '#FFF5F7',
     inputBg: '#FFF8FA',
     sectionBg: '#F6D2DB',
     border: '#E8B9C7',
     accent: '#99506D',
-    accentSoft: '#F0CBD7',
+    accentSoft: '#F6E1E8',
     checkboxFill: '#99506D',
     paperLine: '#E4B3C3',
   },
   mint: {
     ...lightTheme,
+    // 4.51:1 on this palette's sectionBg (#D2E8D1).
+    mutedText: '#666560',
     background: '#E7F4E7',
     card: '#F5FFF5',
     inputBg: '#FAFFFA',
     sectionBg: '#D2E8D1',
     border: '#B7D2B6',
     accent: '#3F7547',
-    accentSoft: '#D5EBD8',
+    accentSoft: '#DCEEDE',
     checkboxFill: '#3F7547',
     paperLine: '#B8D3B6',
   },
   sky: {
     ...lightTheme,
+    // 4.51:1 on this palette's sectionBg (#D4E2F7).
+    mutedText: '#66645F',
     background: '#E7F0FF',
     card: '#F5F9FF',
     inputBg: '#FAFCFF',
     sectionBg: '#D4E2F7',
     border: '#B9CCE8',
     accent: '#386D9E',
-    accentSoft: '#D5E5F5',
+    accentSoft: '#DEEBF7',
     checkboxFill: '#386D9E',
     paperLine: '#B9CCE8',
   },
@@ -123,7 +142,7 @@ export const lightPalettes: Record<string, ThemeTokens> = {
     background: '#F2F2F0',
     card: '#FCFCFA',
     text: '#202020',
-    mutedText: '#6A6A66',
+    mutedText: '#696965',
     border: '#DDDDD9',
     accent: '#3F3F3C',
     accentSoft: '#E8E7E3',
@@ -134,7 +153,7 @@ export const lightPalettes: Record<string, ThemeTokens> = {
     sectionBg: '#E9E9E5',
     onAccent: '#FCFCFA',
     paperLine: '#D8D7D2',
-    actionPin: '#8A7351',
+    actionPin: '#887150',
     actionRepeat: '#6D6A64',
   },
 };

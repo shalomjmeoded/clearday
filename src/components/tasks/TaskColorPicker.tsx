@@ -28,17 +28,26 @@ export function TaskColorPicker({ visible, selectedColor, onClose, onSelect }: P
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
         <Pressable
           style={[styles.sheet, { backgroundColor: tokens.background, borderColor: tokens.border, marginBottom: sheetBottomMargin }]}
           onPress={(e) => e.stopPropagation()}
+          accessible={false}
+          onAccessibilityEscape={onClose}
         >
-          <Text style={[typography.caption, styles.title, { color: tokens.mutedText }]}>
+          <Text
+            style={[typography.caption, styles.title, { color: tokens.mutedText }]}
+            accessibilityRole="header"
+          >
             Color
           </Text>
-          <View style={styles.grid}>
+          <View style={styles.grid} accessibilityRole="radiogroup">
             <Pressable
               onPress={() => pick(null)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selectedColor == null }}
+              accessibilityLabel="No color"
+              hitSlop={4}
               style={[
                 styles.noneSwatch,
                 {
@@ -53,7 +62,10 @@ export function TaskColorPicker({ visible, selectedColor, onClose, onSelect }: P
               <Pressable
                 key={item.key}
                 onPress={() => pick(item.value)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selectedColor === item.value }}
                 accessibilityLabel={item.label}
+                hitSlop={4}
                 style={[
                   styles.swatch,
                   {
@@ -94,18 +106,21 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     alignItems: 'center',
   },
+  // 36pt here (matching the task-detail swatches) plus 4pt of hitSlop reaches
+  // the 44pt guideline. The grid gap is 8pt, so neighbouring hit areas meet
+  // without overlapping.
   noneSwatch: {
-    minHeight: 32,
-    borderRadius: 16,
+    minHeight: 36,
+    borderRadius: 18,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     justifyContent: 'center',
     minWidth: MIN_TOUCH_TARGET,
   },
   swatch: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 2,
   },
   swatchSelected: {

@@ -61,6 +61,12 @@ export function CompletedSection({
     <View style={[styles.wrap, { borderTopColor: tokens.border }]}>
       <Pressable
         onPress={toggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        // Explicit, so the chevron glyph stays out of the spoken name.
+        accessibilityLabel={`Completed, ${tasks.length} ${
+          tasks.length === 1 ? 'task' : 'tasks'
+        }`}
         style={[styles.header, { backgroundColor: tokens.sectionBg }]}
       >
         <Text style={[typography.meta, { color: tokens.mutedText }]}>

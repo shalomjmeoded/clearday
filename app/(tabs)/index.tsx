@@ -342,7 +342,10 @@ export default function TodayScreen() {
     <View>
       <View style={[styles.header, styles.headerTop]}>
         <View style={styles.headerText}>
-          <Text style={[typography.heroTitle, { color: tokens.text }]}>
+          <Text
+            style={[typography.heroTitle, { color: tokens.text }]}
+            accessibilityRole="header"
+          >
             Today
           </Text>
           <Pressable
@@ -352,7 +355,12 @@ export default function TodayScreen() {
             }}
             hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel="Change which list Today shows"
+            // The old label replaced the children outright, so the date and
+            // the list name were never spoken at all.
+            accessibilityLabel={`${formatHeaderDate()}. Showing list: ${
+              lists.find((list) => list.id === defaultListId)?.name ?? 'Inbox'
+            }`}
+            accessibilityHint="Changes which list Today shows"
           >
             <Text
               style={[
@@ -371,6 +379,8 @@ export default function TodayScreen() {
         </View>
         <Pressable
           onPress={openFocus}
+          accessibilityRole="button"
+          accessibilityHint="Opens focus mode"
           style={({ pressed }) => [
             styles.focusBtn,
             {
@@ -389,6 +399,15 @@ export default function TodayScreen() {
       <View style={styles.header}>
         <Pressable
           onPress={toggleOrder}
+          accessibilityRole="button"
+          accessibilityLabel={`Sort: ${
+            SORT_OPTIONS.find((option) => option.key === sortMode)?.label
+          }`}
+          accessibilityHint="Opens the sort options"
+          accessibilityState={{ expanded: sortMenuOpen }}
+          // Stays inside the header's own 8pt bottom padding, so it cannot
+          // overlap the status tabs below.
+          hitSlop={4}
           style={({ pressed }) => [
             styles.sortPill,
             {
@@ -468,7 +487,10 @@ export default function TodayScreen() {
         </View>
       ) : null}
       {sortMenuOpen ? (
-        <View style={[styles.sortMenu, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
+        <View
+          style={[styles.sortMenu, { backgroundColor: tokens.card, borderColor: tokens.border }]}
+          accessibilityRole="radiogroup"
+        >
           {SORT_OPTIONS.map((option) => {
             const active = option.key === sortMode;
             return (
@@ -480,6 +502,11 @@ export default function TodayScreen() {
                   setSortMode(option.key);
                   setSortMenuOpen(false);
                 }}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active }}
+                // Explicit, so the checkmark glyph on the active row cannot
+                // leak into the label derived from children.
+                accessibilityLabel={option.label}
                 style={({ pressed }) => [styles.sortOption, pressed && { opacity: 0.72 }]}
               >
                 <Text style={[typography.meta, { color: active ? tokens.accent : tokens.text }]}>
@@ -494,6 +521,7 @@ export default function TodayScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        accessibilityRole="tablist"
         contentContainerStyle={[styles.statusTabs, { borderBottomColor: tokens.border }]}
       >
         {statusTabs.map((tab) => {
@@ -502,6 +530,15 @@ export default function TodayScreen() {
             <Pressable
               key={tab.key}
               onPress={() => setStatusFilter(tab.key)}
+              accessibilityRole="tab"
+              // Tabs are selected, not checked — `selected` is what maps to the
+              // iOS selected trait and to View.setSelected on Android.
+              accessibilityState={{ selected: active }}
+              // Without this the nested count reads as a bare trailing number
+              // ("All 5"), and the active tab is marked only by an underline.
+              accessibilityLabel={`${tab.label}, ${tab.count} ${
+                tab.count === 1 ? 'task' : 'tasks'
+              }`}
               style={styles.statusTab}
             >
               <Text
@@ -631,7 +668,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.sm + 2,
-    minHeight: 32,
+    // Matches the icon buttons in the same row, which already set its height,
+    // so this costs no vertical space. 4pt of hitSlop takes it to 44.
+    minHeight: 36,
     justifyContent: 'center',
   },
   sortText: { fontSize: 13, lineHeight: 17 },
@@ -671,7 +710,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sortOption: {
-    minHeight: 34,
+    // Full-width menu rows, so height was the only thing short of 44. Brings
+    // them in line with the other option sheets.
+    minHeight: MIN_TOUCH_TARGET,
     paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -683,7 +724,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   statusTab: {
-    minHeight: 38,
+    // hitSlop would have to reach into the header above or the first task row
+    // below, either of which would overlap something tappable. Growing is
+    // safe here: `flex-end` keeps the label the same distance from the
+    // underline, so only the space above it increases.
+    minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'flex-end',
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm + 2,

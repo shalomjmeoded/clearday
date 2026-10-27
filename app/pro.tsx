@@ -19,6 +19,7 @@ import { radius, spacing } from '@/theme/spacing';
 import { useTheme } from '@/theme/ThemeProvider';
 import { typography } from '@/theme/typography';
 import { triggerSelectionHaptic } from '@/utils/haptics';
+import { useAnnounceOnChange } from '@/utils/accessibility';
 
 const STANDARD_APPLE_EULA_URL =
   'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
@@ -53,6 +54,11 @@ export default function ProScreen() {
   const loadOfferings = useProStore((s) => s.loadOfferings);
   const purchase = useProStore((s) => s.purchase);
   const restorePurchases = useProStore((s) => s.restorePurchases);
+
+  // `accessibilityLiveRegion` below is Android-only, so on iOS a billing
+  // problem or a failed purchase would otherwise appear in silence.
+  useAnnounceOnChange(notice?.message);
+  useAnnounceOnChange(error?.message);
 
   const [selectedProductId, setSelectedProductId] = useState<string>(
     PRODUCT_IDS.yearly
@@ -275,7 +281,9 @@ export default function ProScreen() {
                   }}
                   disabled={isPro}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected, disabled: isPro }}
+                  // `checked` is what TalkBack reads off a RadioButton;
+                  // `selected` alone is announced only on iOS.
+                  accessibilityState={{ checked: selected, disabled: isPro }}
                   accessibilityLabel={`${plan.label}, ${plan.price}${plan.period}`}
                   style={[
                     styles.plan,

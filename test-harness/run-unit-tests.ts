@@ -23,6 +23,7 @@ import { listRepository } from '@/features/lists/listRepository';
 import { useSettingsStore } from '@/store/settingsStore';
 import { applyPartialOrder } from '@/utils/reorder';
 import { DatabaseSync } from 'node:sqlite';
+import { __clearAnnouncements, announcementLog } from './stubs/react-native';
 import {
   __resetHandledResponses,
   claimResponse,
@@ -55,6 +56,13 @@ import { parseTaskInput } from '@/utils/parseTaskInput';
 import { getNextDueDate, shiftReminderToDueDate } from '@/utils/recurrence';
 import { isOverdue, msUntilNextLocalMidnight, toDueDateIso } from '@/utils/dates';
 import { tomorrowIso } from '@/utils/scheduleDates';
+import { findContrastFailures } from '@/theme/contrast';
+import { darkPalettes, lightPalettes } from '@/theme/tokens';
+import { announce, resolveAccessibleTimeout } from '@/utils/accessibility';
+import { describeTaskRow, taskReminderDisplay } from '@/utils/taskAccessibility';
+import { moveByOneSlot } from '@/utils/reorder';
+import { formatTime } from '@/utils/dates';
+import type { Task } from '@/types/task';
 import {
   buildReminderIso,
   effectiveReminderAt,
@@ -3204,6 +3212,159 @@ async function main() {
     assert.equal(msUntilNextLocalMidnight(local(2026, 10, 25, 0, 0)), 24 * 3600_000 + 1000);
     const almost = new Date(2026, 9, 25, 23, 59, 59, 0);
     assert.equal(msUntilNextLocalMidnight(almost), 2000);
+  });
+
+  await test('a11y: move up/down reorders one slot and refuses impossible moves', () => {
+    const ids = (items: { id: string }[] | null) =>
+      items === null ? null : items.map((i) => i.id).join(',');
+    const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+
+    assert.equal(ids(moveByOneSlot(list, 'b', -1)), 'b,a,c', 'up swaps with the row above');
+    assert.equal(ids(moveByOneSlot(list, 'b', 1)), 'a,c,b', 'down swaps with the row below');
+    assert.equal(ids(moveByOneSlot(list, 'a', 1)), 'b,a,c');
+    assert.equal(ids(moveByOneSlot(list, 'c', -1)), 'a,c,b');
+
+    // Null, not an unchanged copy, so the caller skips the write and haptic.
+    assert.equal(moveByOneSlot(list, 'a', -1), null, 'first row cannot move up');
+    assert.equal(moveByOneSlot(list, 'c', 1), null, 'last row cannot move down');
+    assert.equal(moveByOneSlot(list, 'missing', 1), null, 'unknown id is a no-op');
+    assert.equal(moveByOneSlot([], 'a', 1), null);
+    assert.equal(moveByOneSlot([{ id: 'only' }], 'only', 1), null);
+    assert.equal(moveByOneSlot([{ id: 'only' }], 'only', -1), null);
+
+    // The source list is never mutated — manualSortTasks holds it as state.
+    assert.equal(ids(list), 'a,b,c');
+
+    // Round trip: a move and its inverse restore the original order, which is
+    // what makes repeated rotor actions safe.
+    const moved = moveByOneSlot(list, 'a', 1)!;
+    assert.equal(ids(moveByOneSlot(moved, 'a', -1)), 'a,b,c');
+  });
+
+  await test('a11y: a task row speaks everything it shows', () => {
+    const base: Task = {
+      id: 't1',
+      title: 'Buy milk',
+      status: 'active',
+      priority: 'normal',
+      recurrence: 'none',
+      sortOrder: 0,
+      createdAt: '2026-10-27T10:00:00.000Z',
+      updatedAt: '2026-10-27T10:00:00.000Z',
+    };
+
+    assert.equal(describeTaskRow(base), 'Buy milk');
+
+    // Completion is conveyed visually by strikethrough alone, so it has to be
+    // spoken or it is simply absent.
+    assert.equal(
+      describeTaskRow({ ...base, status: 'completed' }),
+      'Buy milk. Completed'
+    );
+    assert.equal(
+      describeTaskRow({ ...base, status: 'archived' }, { restoreMode: true }),
+      'Buy milk. Archived'
+    );
+
+    // Priority markers are icons only.
+    assert.equal(
+      describeTaskRow({ ...base, priority: 'important' }),
+      'Buy milk. Starred'
+    );
+    assert.equal(
+      describeTaskRow({ ...base, priority: 'must_do_today' }),
+      'Buy milk. Pinned to today'
+    );
+
+    // The list name and cadence are hidden on a completed row, and the label
+    // follows the row rather than inventing detail it does not show.
+    const repeating = { ...base, recurrence: 'daily' as const };
+    assert.equal(
+      describeTaskRow(repeating, { listName: 'Errands' }),
+      'Buy milk. Repeats daily. List: Errands'
+    );
+    assert.equal(
+      describeTaskRow(
+        { ...repeating, status: 'completed', recurringTaskId: 'live-1' },
+        { listName: 'Errands' }
+      ),
+      'Buy milk. Completed. Repeating task'
+    );
+
+    // A snoozed reminder reads as its pushed-out time, matching the row.
+    const future = new Date(Date.now() + 3 * 3600_000).toISOString();
+    const past = new Date(Date.now() - 3 * 3600_000).toISOString();
+    assert.ok(
+      describeTaskRow({ ...base, reminderAt: past, snoozedUntil: future })
+        .includes(formatTime(future)),
+      'the effective time is spoken, not the original'
+    );
+    assert.ok(
+      describeTaskRow({ ...base, reminderAt: past }).includes('already passed'),
+      'a lapsed reminder says so rather than relying on strikethrough'
+    );
+    // Completing a task clears the "already passed" framing, as on the row.
+    assert.ok(
+      !describeTaskRow({ ...base, reminderAt: past, status: 'completed' })
+        .includes('already passed')
+    );
+    assert.equal(taskReminderDisplay(base).label, '', 'no reminder, nothing to say');
+    assert.equal(taskReminderDisplay({ ...base, reminderAt: past }).isPast, true);
+  });
+
+  await test('a11y: announcements queue on iOS and ignore empty messages', () => {
+    __clearAnnouncements();
+    announce('Task deleted. Undo available.');
+    // Queued, so it does not cut VoiceOver off mid-sentence.
+    assert.deepEqual(announcementLog, [
+      { message: 'Task deleted. Undo available.', queued: true },
+    ]);
+
+    // Guard against announcing an empty hint when a message clears.
+    announce('');
+    assert.equal(announcementLog.length, 1);
+    __clearAnnouncements();
+  });
+
+  await test('a11y: an accessible timeout never comes out shorter than the base', () => {
+    // Regression: a lagging async recommendation once drove this to 0 on the
+    // render a toast appeared, dismissing it instantly.
+    assert.equal(resolveAccessibleTimeout(5000), 5000);
+    assert.equal(resolveAccessibleTimeout(5000, { recommendedMs: 0 }), 5000);
+    assert.equal(resolveAccessibleTimeout(5000, { recommendedMs: 9000 }), 9000);
+    assert.equal(resolveAccessibleTimeout(5000, { recommendedMs: 1000 }), 5000);
+    // Only extends when the toast has something to act on.
+    assert.equal(resolveAccessibleTimeout(5000, { screenReaderEnabled: true }), 5000);
+    assert.equal(
+      resolveAccessibleTimeout(5000, {
+        screenReaderEnabled: true,
+        extendForScreenReader: true,
+      }),
+      15000
+    );
+    // A generous base is never shortened to the screen-reader floor.
+    assert.equal(
+      resolveAccessibleTimeout(30000, {
+        screenReaderEnabled: true,
+        extendForScreenReader: true,
+      }),
+      30000
+    );
+  });
+
+  await test('theme: every palette meets WCAG AA contrast on the pairs it renders', () => {
+    const failures = [
+      ...Object.entries(lightPalettes).flatMap(([name, tokens]) =>
+        findContrastFailures(`light/${name}`, tokens)
+      ),
+      ...Object.entries(darkPalettes).flatMap(([name, tokens]) =>
+        findContrastFailures(`dark/${name}`, tokens)
+      ),
+    ];
+    assert.deepEqual(
+      failures.map((f) => `${f.palette} ${f.what}: ${f.actual.toFixed(2)} < ${f.minimum}`),
+      []
+    );
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

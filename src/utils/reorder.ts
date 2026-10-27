@@ -1,4 +1,28 @@
 /**
+ * Moves one item `delta` slots within `ids`, or returns null when the move is
+ * not possible (unknown id, or already at the end it is heading for).
+ *
+ * Backs the "Move up"/"Move down" accessibility actions, which stand in for a
+ * drag gesture no screen reader can perform. Returning null rather than an
+ * unchanged copy lets the caller skip the write and the haptic entirely.
+ */
+export function moveByOneSlot<T extends { id: string }>(
+  items: T[],
+  id: string,
+  delta: number
+): T[] | null {
+  const from = items.findIndex((item) => item.id === id);
+  if (from < 0) return null;
+  const to = from + delta;
+  if (to < 0 || to >= items.length) return null;
+
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/**
  * Applies a reordering of a visible subset back onto the full list. The
  * visible items take each other's slots in their new order; everything that
  * was filtered out keeps its position. Dragging within a search result or a
