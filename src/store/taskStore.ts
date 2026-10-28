@@ -141,6 +141,12 @@ interface TaskState {
   listTasks: Task[];
   loading: boolean;
   todayReady: boolean;
+  /**
+   * Bumped whenever a view refetches from the database. Anything that reads
+   * the table outside the store's own views (search) re-runs on change, so a
+   * result list cannot keep showing a row that was just completed or deleted.
+   */
+  revision: number;
   /** Whether older completed tasks remain beyond the pages loaded so far. */
   doneHasMore: boolean;
   /** Loads the next page of completed history into doneTasks. */
@@ -270,6 +276,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   listTasks: [],
   loading: false,
   todayReady: false,
+  revision: 0,
   doneHasMore: false,
 
   refreshToday: coalesceRefresh(async () => {
@@ -282,7 +289,12 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       fetchTodayTasks(),
       fetchTodayCompletedTasks(),
     ]);
-    set({ todayTasks, todayCompletedTasks, todayReady: true });
+    set((state) => ({
+      todayTasks,
+      todayCompletedTasks,
+      todayReady: true,
+      revision: state.revision + 1,
+    }));
   }),
 
   refreshTomorrow: coalesceRefresh(async () => {
@@ -295,7 +307,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       fetchTomorrowTasks(),
       fetchTomorrowCompletedTasks(),
     ]);
-    set({ tomorrowTasks, tomorrowCompletedTasks });
+    set((state) => ({
+      tomorrowTasks,
+      tomorrowCompletedTasks,
+      revision: state.revision + 1,
+    }));
   }),
 
   refreshLater: coalesceRefresh(async () => {
@@ -305,7 +321,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
 
     const laterTasks = await fetchLaterTasks();
-    set({ laterTasks });
+    set((state) => ({ laterTasks, revision: state.revision + 1 }));
   }),
 
   // Resets to the first page; loadMoreDone walks further back on scroll. A
@@ -319,7 +335,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     const span = Math.max(get().doneTasks.length, DONE_PAGE_SIZE);
     const doneTasks = await fetchDoneTasks(span);
-    set({ doneTasks, doneHasMore: doneTasks.length === span });
+    set((state) => ({
+      doneTasks,
+      doneHasMore: doneTasks.length === span,
+      revision: state.revision + 1,
+    }));
   }),
 
   loadMoreDone: async () => {
@@ -343,7 +363,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
 
     const archivedTasks = await taskRepository.getArchived();
-    set({ archivedTasks });
+    set((state) => ({ archivedTasks, revision: state.revision + 1 }));
   }),
 
   refreshList: async (listId: string) => {
@@ -353,7 +373,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
 
     const listTasks = await taskRepository.getByListId(listId);
-    set({ listTasks });
+    set((state) => ({ listTasks, revision: state.revision + 1 }));
   },
 
   refreshAll: async () => {
@@ -529,6 +549,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     // during the Undo window (adding a task, switching tabs) keeps it hidden.
     removeTaskFromState(set, id);
     await taskRepository.softDelete(id);
+    // No view refetches until the Undo window closes, so tell anything
+    // reading the table directly (search) that a row just left it.
+    set((state) => ({ revision: state.revision + 1 }));
 
     // Deletes made while the Undo toast is open join one batch: showing a new
     // toast fires the old one's onExpire, which used to make every delete but
@@ -621,6 +644,23 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   reorderTasks: async (orderedIds, listId) => {
     try {
       await taskRepository.reorderTasks(orderedIds);
+      // Mirror the new slots in state right away. Views are not refetched
+      // on a drag, and a list that later widens (a filter or search
+      // clearing) re-sorts from these values; stale ones would undo the
+      // drag on screen.
+      const slot = new Map(orderedIds.map((id, index) => [id, index]));
+      const apply = (tasks: Task[]) =>
+        tasks.map((task) =>
+          slot.has(task.id) && task.sortOrder !== slot.get(task.id)
+            ? { ...task, sortOrder: slot.get(task.id)! }
+            : task
+        );
+      set((state) => ({
+        todayTasks: apply(state.todayTasks),
+        tomorrowTasks: apply(state.tomorrowTasks),
+        laterTasks: apply(state.laterTasks),
+        listTasks: apply(state.listTasks),
+      }));
     } catch {
       await refreshAfterMutation(get, listId);
     }

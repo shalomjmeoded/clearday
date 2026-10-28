@@ -10,7 +10,7 @@
  * the columns they add, so re-running one against a database that already
  * has the change is harmless.
  */
-import { DEFAULT_SETTINGS } from '@/types/settings';
+import { DEFAULT_SETTINGS, SETTINGS_KEYS, serializeSetting } from '@/types/settings';
 import { nowIso, toDueDateIso } from '@/utils/dates';
 
 import { INBOX_LIST_ID, SCHEMA_VERSION } from './constants';
@@ -262,21 +262,14 @@ async function seedDefaults(db: Db): Promise<void> {
     );
   }
 
-  const settingsRows: [string, string][] = [
-    ['theme', DEFAULT_SETTINGS.theme],
-    ['colorTheme', DEFAULT_SETTINGS.colorTheme],
-    ['hapticsEnabled', String(DEFAULT_SETTINGS.hapticsEnabled)],
-    ['completedTaskBehavior', DEFAULT_SETTINGS.completedTaskBehavior],
-    ['defaultReminderTime', DEFAULT_SETTINGS.defaultReminderTime],
-    ['swipeLeftAction', DEFAULT_SETTINGS.swipeLeftAction],
-    ['swipeRightAction', DEFAULT_SETTINGS.swipeRightAction],
-    ['defaultListId', DEFAULT_SETTINGS.defaultListId],
-  ];
-
-  for (const [key, value] of settingsRows) {
+  // Every setting gets a row, derived from the one definition in
+  // types/settings so a key added there is seeded here too. Runs on every
+  // launch and only fills gaps, which is how an upgraded install picks up a
+  // setting that did not exist when it was first created.
+  for (const key of SETTINGS_KEYS) {
     await db.runAsync(
       'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
-      [key, value]
+      [key, serializeSetting(key, DEFAULT_SETTINGS[key])]
     );
   }
 }

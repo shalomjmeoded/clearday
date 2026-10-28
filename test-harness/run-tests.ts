@@ -494,6 +494,7 @@ async function main() {
         'swipeLeftAction',
         'swipeRightAction',
         'theme',
+        'todaySortMode',
       ]
     );
   });

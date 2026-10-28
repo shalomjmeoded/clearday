@@ -1,18 +1,28 @@
 import { router } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Keyboard, StyleSheet, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
+import { SearchBar, SearchToggle } from '@/components/ui/SearchBar';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { TaskList } from '@/components/tasks/TaskList';
+import { taskMatchesSearch } from '@/features/tasks/taskQueries';
+import { useTaskSearch } from '@/hooks/useTaskSearch';
 import type { QuickAddOptions } from '@/types/quickAdd';
-import type { Task } from '@/types/task';
+import type { Task, TaskStatus } from '@/types/task';
+import { spacing } from '@/theme/spacing';
+import { localDayRangeIso } from '@/utils/dates';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { dayIso } from '@/utils/scheduleDates';
 import { triggerSuccessHaptic, triggerLightHaptic } from '@/utils/haptics';
+
+// Schedule is about what is coming up, so search looks at every open task
+// dated tomorrow or later — Tomorrow and Later together, since the point of
+// searching is not knowing which one holds the task.
+const SEARCH_STATUSES: readonly TaskStatus[] = ['active'];
 
 export default function ScheduleScreen() {
   const addInputRef = useRef<TextInput | null>(null);
@@ -31,6 +41,13 @@ export default function ScheduleScreen() {
   const setImportant = useTaskStore((s) => s.setImportant);
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searching = searchQuery.trim().length > 0;
+  const search = useTaskSearch(searchQuery, SEARCH_STATUSES, {
+    dueFrom: localDayRangeIso(1).start,
+    activeOrder: 'date',
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -39,11 +56,35 @@ export default function ScheduleScreen() {
     }, [refreshTomorrow, refreshLater])
   );
 
-  const tasks = segment === 'tomorrow' ? tomorrowTasks : laterTasks;
+  const tasks = searching
+    ? search.results
+    : segment === 'tomorrow'
+      ? tomorrowTasks
+      : laterTasks;
   const completedTasks = useMemo((): Task[] => {
+    // Tomorrow's early finishes are the only completed rows this screen
+    // holds; a search narrows them with the same matcher the SQL side uses.
+    if (searching) {
+      return tomorrowCompletedTasks.filter((task) => taskMatchesSearch(task, searchQuery));
+    }
     if (segment !== 'tomorrow') return [];
     return tomorrowCompletedTasks;
-  }, [segment, tomorrowCompletedTasks]);
+  }, [searchQuery, searching, segment, tomorrowCompletedTasks]);
+
+  const toggleSearch = async () => {
+    await triggerLightHaptic();
+    if (searchOpen) {
+      Keyboard.dismiss();
+      setSearchQuery('');
+    }
+    setSearchOpen((value) => !value);
+  };
+
+  const closeSearch = () => {
+    Keyboard.dismiss();
+    setSearchOpen(false);
+    setSearchQuery('');
+  };
 
   const handleComplete = async (id: string) => {
     await triggerSuccessHaptic();
@@ -54,20 +95,29 @@ export default function ScheduleScreen() {
     await triggerLightHaptic();
     await uncompleteTask(id);
   };
-  const emptyMessage =
-    segment === 'tomorrow'
+  const emptyMessage = searching
+    ? search.active
+      ? 'No matches.'
+      : 'Searching…'
+    : segment === 'tomorrow'
       ? 'Nothing for tomorrow.'
       : 'Nothing on the horizon.';
-  const emptySubtitle =
-    segment === 'tomorrow'
+  const emptySubtitle = searching
+    ? undefined
+    : segment === 'tomorrow'
       ? 'Plan the next useful thing, or swipe a Today task to Tomorrow.'
       : 'Add anything with a date and it will land here.';
-  const emptyActionLabel =
-    segment === 'tomorrow' ? 'Add for tomorrow' : 'Add scheduled task';
+  const emptyActionLabel = searching
+    ? undefined
+    : segment === 'tomorrow'
+      ? 'Add for tomorrow'
+      : 'Add scheduled task';
 
   const handleAdd = async (text: string, options?: QuickAddOptions) => {
+    // While searching the segment control is hidden, so a new task takes
+    // the nearest day rather than a date the user cannot see.
     const defaultDueDate =
-      segment === 'tomorrow' ? dayIso(1) : dayIso(7);
+      searching || segment === 'tomorrow' ? dayIso(1) : dayIso(7);
     // Use the same list as Today, so a task added here is not stranded in
     // Inbox and invisible on a list-scoped Today.
     const created = await addTask(text, defaultListId, {
@@ -85,21 +135,44 @@ export default function ScheduleScreen() {
       onSubmit={handleAdd}
       inputRef={addInputRef}
       placeholder={
-        segment === 'tomorrow'
+        searching || segment === 'tomorrow'
           ? 'Add for tomorrow…'
           : 'Add with a date…'
       }
       header={
         <>
-          <ScreenHeader title="Schedule" />
-          <SegmentedControl
-            segments={[
-              { key: 'tomorrow', label: 'Tomorrow' },
-              { key: 'later', label: 'Later' },
-            ]}
-            value={segment}
-            onChange={setSegment}
+          <ScreenHeader
+            title="Schedule"
+            right={
+              <SearchToggle
+                open={searchOpen}
+                onPress={toggleSearch}
+                label="Search upcoming tasks"
+              />
+            }
           />
+          {searchOpen ? (
+            // Takes the segment control's slot (and its height, so the list
+            // does not jump): results span both segments, and each row's
+            // side date says where it falls.
+            <View style={styles.searchSlot}>
+              <SearchBar
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onClose={closeSearch}
+                placeholder="Search upcoming"
+              />
+            </View>
+          ) : (
+            <SegmentedControl
+              segments={[
+                { key: 'tomorrow', label: 'Tomorrow' },
+                { key: 'later', label: 'Later' },
+              ]}
+              value={segment}
+              onChange={setSegment}
+            />
+          )}
         </>
       }
     >
@@ -107,11 +180,11 @@ export default function ScheduleScreen() {
         <TaskList
           activeTasks={tasks}
           completedTasks={completedTasks}
-          inlineCompleted={segment === 'tomorrow'}
+          inlineCompleted={searching || segment === 'tomorrow'}
           emptyMessage={emptyMessage}
           emptySubtitle={emptySubtitle}
           emptyActionLabel={emptyActionLabel}
-          onEmptyPress={() => addInputRef.current?.focus()}
+          onEmptyPress={searching ? undefined : () => addInputRef.current?.focus()}
           onComplete={handleComplete}
           onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}
@@ -134,4 +207,6 @@ export default function ScheduleScreen() {
 
 const styles = StyleSheet.create({
   list: { flex: 1 },
+  // SegmentedControl is ~49pt plus a 24pt bottom margin; the bar is 50pt.
+  searchSlot: { marginBottom: spacing.lg - 1 },
 });

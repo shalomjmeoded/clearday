@@ -16,7 +16,10 @@ import Animated, { ZoomIn, ZoomOut } from 'react-native-reanimated';
 
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { TaskList } from '@/components/tasks/TaskList';
+import { SearchBar, SearchToggle } from '@/components/ui/SearchBar';
 import { INBOX_LIST_ID } from '@/db/constants';
+import { taskMatchesSearch } from '@/features/tasks/taskQueries';
+import { useTaskSearch } from '@/hooks/useTaskSearch';
 import { MIN_TOUCH_TARGET } from '@/constants/layout';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -25,6 +28,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { QuickAddOptions } from '@/types/quickAdd';
+import type { TaskSortMode } from '@/types/settings';
 import { isOverdue, isToday, formatHeaderDate } from '@/utils/dates';
 import { applyPartialOrder } from '@/utils/reorder';
 import {
@@ -32,15 +36,10 @@ import {
   triggerMediumHaptic,
   triggerSuccessHaptic,
 } from '@/utils/haptics';
-import type { Task } from '@/types/task';
+import type { Task, TaskStatus } from '@/types/task';
 
-type TaskSortMode =
-  | 'manual'
-  | 'scheduled'
-  | 'created'
-  | 'modified'
-  | 'alpha'
-  | 'color';
+// Today only ever lists open work; finished matches belong to Finished.
+const SEARCH_STATUSES: readonly TaskStatus[] = ['active'];
 
 const SORT_OPTIONS: { key: TaskSortMode; label: string }[] = [
   { key: 'manual', label: 'Manual Sorting' },
@@ -83,8 +82,15 @@ export default function TodayScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [adding, setAdding] = useState(false);
-  const [sortMode, setSortMode] = useState<TaskSortMode>('manual');
+  // Persisted: a sort chosen once should still be there tomorrow.
+  const sortMode = useSettingsStore((s) => s.settings.todaySortMode);
+  const setSetting = useSettingsStore((s) => s.setSetting);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  // Runs in SQL against the whole list rather than the loaded views, so a
+  // task Today would never show (undated, captured last week) is still
+  // findable from here.
+  const search = useTaskSearch(searchQuery, SEARCH_STATUSES, { listId: defaultListId });
+  const searching = searchQuery.trim().length > 0;
 
   useFocusEffect(
     useCallback(() => {
@@ -127,7 +133,25 @@ export default function TodayScreen() {
 
   const filteredActive = useMemo(() => {
     let nextTasks: Task[];
-    if (statusFilter === 'overdue') {
+    if (searching) {
+      // The status tabs narrow the matches the same way they narrow the
+      // unfiltered list: by membership in the view each tab stands for.
+      const inView = (view: Task[]) => {
+        const ids = new Set(view.map((task) => task.id));
+        return search.results.filter((task) => ids.has(task.id));
+      };
+      if (statusFilter === 'overdue') {
+        nextTasks = search.results.filter(
+          (task) => task.dueDate && isOverdue(task.dueDate)
+        );
+      } else if (statusFilter === 'tomorrow') {
+        nextTasks = inView(tomorrowTasks);
+      } else if (statusFilter === 'today') {
+        nextTasks = inView(todayTasks);
+      } else {
+        nextTasks = search.results;
+      }
+    } else if (statusFilter === 'overdue') {
       nextTasks = listScopedActive.filter(
         (task) => task.dueDate && isOverdue(task.dueDate)
       );
@@ -141,14 +165,6 @@ export default function TodayScreen() {
       );
     } else {
       nextTasks = filterTasksByList(allActiveTasks, defaultListId);
-    }
-    const query = searchQuery.trim().toLowerCase();
-    if (query) {
-      nextTasks = nextTasks.filter(
-        (task) =>
-          task.title.toLowerCase().includes(query) ||
-          (task.notes ?? '').toLowerCase().includes(query)
-      );
     }
     if (sortMode === 'scheduled') {
       return [...nextTasks].sort((a, b) => {
@@ -179,10 +195,12 @@ export default function TodayScreen() {
     }
     return nextTasks;
   }, [
+    allActiveTasks,
     listScopedActive,
     listColors,
     defaultListId,
-    searchQuery,
+    search.results,
+    searching,
     sortMode,
     statusFilter,
     todayTasks,
@@ -207,18 +225,14 @@ export default function TodayScreen() {
     } else {
       completed = filterTasksByList(todayCompletedTasks, defaultListId);
     }
-    const query = searchQuery.trim().toLowerCase();
-    if (query) {
-      completed = completed.filter(
-        (task) =>
-          task.title.toLowerCase().includes(query) ||
-          (task.notes ?? '').toLowerCase().includes(query)
-      );
+    if (searching) {
+      completed = completed.filter((task) => taskMatchesSearch(task, searchQuery));
     }
     return completed;
   }, [
     defaultListId,
     searchQuery,
+    searching,
     statusFilter,
     todayCompletedTasks,
     tomorrowCompletedTasks,
@@ -423,15 +437,7 @@ export default function TodayScreen() {
           </Text>
         </Pressable>
         <View style={styles.headerActions}>
-          <Pressable
-            onPress={toggleSearch}
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="Search tasks"
-          >
-            <Ionicons name="search-outline" size={19} color={tokens.text} />
-          </Pressable>
+          <SearchToggle open={searchOpen} onPress={toggleSearch} label="Search tasks" />
           <Pressable
             onPress={openSettings}
             style={({ pressed }) => [styles.iconBtn, pressed && styles.focusPressed]}
@@ -444,47 +450,11 @@ export default function TodayScreen() {
         </View>
       </View>
       {searchOpen ? (
-        <View style={styles.searchWrap}>
-          <View
-            style={[
-              styles.searchBox,
-              {
-                borderColor: tokens.border,
-                backgroundColor: tokens.sectionBg,
-              },
-            ]}
-          >
-            <Ionicons name="search-outline" size={16} color={tokens.mutedText} />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoFocus
-              placeholder="Search"
-              placeholderTextColor={tokens.mutedText}
-              style={[typography.body, styles.searchInput, { color: tokens.text }]}
-            />
-            {searchQuery ? (
-              <Pressable
-                onPress={() => setSearchQuery('')}
-                style={({ pressed }) => [styles.searchIconBtn, pressed && styles.focusPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search"
-                hitSlop={8}
-              >
-                <Ionicons name="close-circle" size={17} color={tokens.mutedText} />
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={closeSearch}
-              style={({ pressed }) => [styles.searchIconBtn, pressed && styles.focusPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Close search"
-              hitSlop={8}
-            >
-              <Ionicons name="chevron-up" size={18} color={tokens.mutedText} />
-            </Pressable>
-          </View>
-        </View>
+        <SearchBar
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          onClose={closeSearch}
+        />
       ) : null}
       {sortMenuOpen ? (
         <View
@@ -499,8 +469,8 @@ export default function TodayScreen() {
                 onPress={async () => {
                   Keyboard.dismiss();
                   await triggerLightHaptic();
-                  setSortMode(option.key);
                   setSortMenuOpen(false);
+                  await setSetting('todaySortMode', option.key);
                 }}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: active }}
@@ -606,13 +576,19 @@ export default function TodayScreen() {
           listNames={listNames}
           listColors={listColors}
           emptyMessage={
-            statusFilter === 'all'
-              ? 'No tasks here.'
-              : `No ${statusFilter} tasks.`
+            searching
+              ? search.active
+                ? 'No matches.'
+                : 'Searching…'
+              : statusFilter === 'all'
+                ? 'No tasks here.'
+                : `No ${statusFilter} tasks.`
           }
-          emptySubtitle="Capture it before it gets noisy."
-          emptyActionLabel={adding ? undefined : 'Add a task'}
-          onEmptyPress={adding ? undefined : focusQuickAdd}
+          emptySubtitle={searching ? undefined : 'Capture it before it gets noisy.'}
+          // A task added under an open search would not match it and seem
+          // to vanish, so the empty state offers nothing while searching.
+          emptyActionLabel={adding || searching ? undefined : 'Add a task'}
+          onEmptyPress={adding || searching ? undefined : focusQuickAdd}
           onComplete={handleComplete}
           onUncomplete={handleUncomplete}
           onPress={(id) => router.push(`/task/${id}`)}
@@ -622,8 +598,8 @@ export default function TodayScreen() {
           onSetImportant={setImportant}
           onToggleRecurring={toggleRecurring}
           onReorder={(orderedIds) =>
-            // The list may be filtered or searched; only the visible rows
-            // moved, so hidden tasks keep their slots.
+            // The list may be filtered; only the visible rows moved, so
+            // hidden tasks keep their slots.
             reorderTasks(
               applyPartialOrder(
                 listScopedActive.map((task) => task.id),
@@ -632,7 +608,10 @@ export default function TodayScreen() {
               defaultListId
             )
           }
-          reorderMode={reorderMode}
+          // Search can surface tasks outside the loaded views, whose slots the
+          // partial-order base does not know; results are for finding, not
+          // arranging, so dragging pauses while the search bar is open.
+          reorderMode={reorderMode && !searchOpen}
         />
       </View>
     </ScreenWithBottomBar>
@@ -674,34 +653,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sortText: { fontSize: 13, lineHeight: 17 },
-  searchWrap: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.sm,
-  },
-  searchBox: {
-    minHeight: 38,
-    borderRadius: 19,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingLeft: spacing.md,
-    paddingRight: spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  searchInput: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: 0,
-    fontSize: 16,
-    flex: 1,
-  },
-  searchIconBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   sortMenu: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,

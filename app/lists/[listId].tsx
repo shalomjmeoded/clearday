@@ -1,24 +1,32 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { Screen } from '@/components/layout/Screen';
 import { ScreenWithBottomBar } from '@/components/layout/ScreenWithBottomBar';
 import { HeaderBackButton } from '@/components/navigation/HeaderBackButton';
 import { TaskList } from '@/components/tasks/TaskList';
+import { SearchBar, SearchToggle } from '@/components/ui/SearchBar';
 import { listRepository } from '@/features/lists/listRepository';
+import { useTaskSearch } from '@/hooks/useTaskSearch';
 import { radius, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTaskStore } from '@/store/taskStore';
 import { useTheme } from '@/theme/ThemeProvider';
+import type { TaskStatus } from '@/types/task';
 import {
   triggerLightHaptic,
   triggerSelectionHaptic,
   triggerSuccessHaptic,
 } from '@/utils/haptics';
 import { paramString } from '@/utils/routeParams';
+
+// A list is a place things belong, done or not, so its search also turns
+// up what was finished here ("did I already buy that?"). Completed matches
+// follow the user's completed-task setting like everywhere else.
+const SEARCH_STATUSES: readonly TaskStatus[] = ['active', 'completed'];
 
 export default function ListDetailScreen() {
   const { listId: listIdParam } = useLocalSearchParams<{ listId: string }>();
@@ -42,6 +50,24 @@ export default function ListDetailScreen() {
   const toggleRecurring = useTaskStore((s) => s.toggleRecurring);
   const moveToTomorrow = useTaskStore((s) => s.moveToTomorrow);
   const reorderTasks = useTaskStore((s) => s.reorderTasks);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searching = searchQuery.trim().length > 0;
+  const search = useTaskSearch(searchQuery, SEARCH_STATUSES, { listId });
+  const completedBehavior = useSettingsStore((s) => s.settings.completedTaskBehavior);
+  const activeTasks = useMemo(
+    () => (searching ? search.results.filter((task) => task.status === 'active') : listTasks),
+    [listTasks, search.results, searching]
+  );
+  const completedMatches = useMemo(
+    () =>
+      // With completed tasks hidden app-wide, a query that only matches
+      // history should read "No matches" rather than a blank list.
+      searching && completedBehavior !== 'hide'
+        ? search.results.filter((task) => task.status === 'completed')
+        : [],
+    [completedBehavior, search.results, searching]
+  );
 
   // Re-read on focus so a rename or recolor from the edit screen shows up.
   useFocusEffect(
@@ -71,6 +97,25 @@ export default function ListDetailScreen() {
     );
   }
 
+  const toggleSearch = async () => {
+    await triggerLightHaptic();
+    if (searchOpen) {
+      Keyboard.dismiss();
+      setSearchQuery('');
+    } else {
+      // Results are for finding, not arranging; the Order pill goes dark
+      // rather than staying lit over a list that cannot be dragged.
+      setReorderMode(false);
+    }
+    setSearchOpen((value) => !value);
+  };
+
+  const closeSearch = () => {
+    Keyboard.dismiss();
+    setSearchOpen(false);
+    setSearchQuery('');
+  };
+
   const useForToday = async () => {
     if (!listId || isTodayDefault) return;
     await triggerSelectionHaptic();
@@ -81,10 +126,23 @@ export default function ListDetailScreen() {
     <View style={styles.header}>
       <HeaderBackButton tokens={tokens} />
       <View style={styles.titleRow}>
-        {listColor ? (
-          <View style={[styles.colorDot, { backgroundColor: listColor }]} />
-        ) : null}
-        <Text style={[typography.screenTitle, { color: tokens.text }]}>{listName}</Text>
+        <View style={styles.titleText}>
+          {listColor ? (
+            <View style={[styles.colorDot, { backgroundColor: listColor }]} />
+          ) : null}
+          <Text
+            style={[typography.screenTitle, styles.title, { color: tokens.text }]}
+            numberOfLines={1}
+            accessibilityRole="header"
+          >
+            {listName}
+          </Text>
+        </View>
+        <SearchToggle
+          open={searchOpen}
+          onPress={toggleSearch}
+          label={`Search ${listName || 'this list'}`}
+        />
       </View>
       <View style={styles.actionsRow}>
         <Pressable
@@ -156,6 +214,17 @@ export default function ListDetailScreen() {
           </Text>
         </Pressable>
       </View>
+      {searchOpen ? (
+        // The header already carries the screen's side padding.
+        <View style={styles.searchWrap}>
+          <SearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onClose={closeSearch}
+            placeholder="Search this list"
+          />
+        </View>
+      ) : null}
     </View>
   );
 
@@ -166,13 +235,15 @@ export default function ListDetailScreen() {
       inputRef={addInputRef}
     >
       <TaskList
-        activeTasks={listTasks}
-        completedTasks={[]}
+        activeTasks={activeTasks}
+        completedTasks={completedMatches}
         listColors={listColor ? { [listId]: listColor } : undefined}
-        emptyMessage="No tasks in this list."
-        emptySubtitle="Start this list with one clear next step."
-        emptyActionLabel="Add to this list"
-        onEmptyPress={() => addInputRef.current?.focus()}
+        emptyMessage={
+          searching ? (search.active ? 'No matches.' : 'Searching…') : 'No tasks in this list.'
+        }
+        emptySubtitle={searching ? undefined : 'Start this list with one clear next step.'}
+        emptyActionLabel={searching ? undefined : 'Add to this list'}
+        onEmptyPress={searching ? undefined : () => addInputRef.current?.focus()}
         onComplete={async (id) => {
           await triggerSuccessHaptic();
           await completeTask(id);
@@ -207,7 +278,14 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.sm,
   },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  titleText: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },
+  title: { flexShrink: 1 },
   colorDot: { width: 12, height: 12, borderRadius: 6 },
   actionsRow: {
     flexDirection: 'row',
@@ -221,4 +299,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionLabel: { fontSize: 14 },
+  searchWrap: { marginHorizontal: -spacing.lg },
 });

@@ -42,6 +42,11 @@ const SECTIONS = [
       'Add a thin color marker from quick add or task detail. Colors help scan a list — they do not fill the whole row.',
   },
   {
+    title: 'Search',
+    body:
+      'Tap the magnifier on Today, Schedule, a list, or Finished Tasks. Each screen searches what it shows: Today looks through open tasks in its list plus anything finished today, Schedule through everything dated tomorrow or later, a list through its open and finished tasks, and Finished Tasks through the whole history. Several words find tasks containing all of them, in titles or notes.',
+  },
+  {
     title: 'Manual sorting',
     body:
       'Choose Manual Sorting from the sort menu on Today, then long-press a row to reorder. Order saves on your device.',

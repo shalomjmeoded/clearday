@@ -8,6 +8,14 @@ export const TASK_SWIPE_ACTIONS = [
   'archive',
   'delete',
 ] as const;
+export const TASK_SORT_MODES = [
+  'manual',
+  'scheduled',
+  'created',
+  'modified',
+  'alpha',
+  'color',
+] as const;
 export const COLOR_THEMES = [
   'classic',
   'yellow',
@@ -21,6 +29,7 @@ export type ThemeMode = (typeof THEME_MODES)[number];
 export type CompletedTaskBehavior = (typeof COMPLETED_TASK_BEHAVIORS)[number];
 export type TaskSwipeAction = (typeof TASK_SWIPE_ACTIONS)[number];
 export type ColorTheme = (typeof COLOR_THEMES)[number];
+export type TaskSortMode = (typeof TASK_SORT_MODES)[number];
 
 export interface AppSettings {
   theme: ThemeMode;
@@ -33,6 +42,8 @@ export interface AppSettings {
   swipeRightAction: TaskSwipeAction;
   /** New tasks from Today and undated “today” tasks use this list. */
   defaultListId: string;
+  /** How Today orders its rows; chosen from the sort pill and kept across launches. */
+  todaySortMode: TaskSortMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -44,6 +55,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   swipeLeftAction: 'tomorrow',
   swipeRightAction: 'archive',
   defaultListId: INBOX_LIST_ID,
+  todaySortMode: 'manual',
 };
 
 export const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof AppSettings)[];
@@ -112,6 +124,7 @@ export function normalizeSettings(
       knownListIds && !knownListIds.has(defaultListId)
         ? INBOX_LIST_ID
         : defaultListId,
+    todaySortMode: oneOf(map.todaySortMode, TASK_SORT_MODES, DEFAULT_SETTINGS.todaySortMode),
   };
 }
 

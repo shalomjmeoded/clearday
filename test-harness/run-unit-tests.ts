@@ -6,6 +6,8 @@
  * Run from repo root: npm run test:unit
  */
 import assert from 'node:assert/strict';
+import React from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
 
 import { getDb, closeDb } from '@/db/client';
 import { INBOX_LIST_ID, SCHEMA_VERSION } from '@/db/constants';
@@ -16,7 +18,17 @@ import {
   whenDbIdle,
 } from '@/db/exclusive';
 import { initDatabase, __MIGRATIONS, PRE_MIGRATION_SNAPSHOT } from '@/db/migrations';
-import { fetchTodayTasks, fetchTomorrowTasks } from '@/features/tasks/taskQueries';
+import {
+  buildGlobPattern,
+  escapeLikePattern,
+  fetchTodayTasks,
+  fetchTomorrowTasks,
+  searchTasks,
+  searchTerms,
+  taskMatchesSearch,
+  termPredicate,
+} from '@/features/tasks/taskQueries';
+import { mergeTasksPreservingOrder } from '@/utils/taskSyncKey';
 import { checkIntegrity, getSnapshotInfo, restoreSnapshot } from '@/db/snapshot';
 import { mapRowToTask } from '@/features/tasks/taskMapper';
 import { listRepository } from '@/features/lists/listRepository';
@@ -36,7 +48,11 @@ import {
   SNOOZE_MINUTES,
   syncScheduledReminders,
 } from '@/features/reminders/reminderService';
-import { taskRepository } from '@/features/tasks/taskRepository';
+import {
+  MAX_NOTES_LENGTH,
+  MAX_TITLE_LENGTH,
+  taskRepository,
+} from '@/features/tasks/taskRepository';
 import {
   PRO_ENTITLEMENT_CACHE_KEY,
   readCachedEntitlement,
@@ -51,18 +67,25 @@ import {
 } from '@/features/pro/subscriptionService';
 import { getIsPro, useProStore } from '@/store/proStore';
 import { useTaskStore } from '@/store/taskStore';
+import { useTaskSearch, type TaskSearchState } from '@/hooks/useTaskSearch';
 import { __resetToastQueue, useToastStore } from '@/store/toastStore';
 import { parseTaskInput } from '@/utils/parseTaskInput';
 import { getNextDueDate, shiftReminderToDueDate } from '@/utils/recurrence';
-import { isOverdue, msUntilNextLocalMidnight, toDueDateIso } from '@/utils/dates';
-import { tomorrowIso } from '@/utils/scheduleDates';
+import {
+  isOverdue,
+  localDayRangeIso,
+  msUntilNextLocalMidnight,
+  toDueDateIso,
+  todayDueIso,
+} from '@/utils/dates';
+import { dayIso, tomorrowIso } from '@/utils/scheduleDates';
 import { findContrastFailures } from '@/theme/contrast';
 import { darkPalettes, lightPalettes } from '@/theme/tokens';
 import { announce, resolveAccessibleTimeout } from '@/utils/accessibility';
 import { describeTaskRow, taskReminderDisplay } from '@/utils/taskAccessibility';
 import { moveByOneSlot } from '@/utils/reorder';
 import { formatTime } from '@/utils/dates';
-import type { Task } from '@/types/task';
+import type { Task, TaskStatus } from '@/types/task';
 import {
   buildReminderIso,
   effectiveReminderAt,
@@ -972,6 +995,7 @@ async function main() {
       swipeLeftAction: 'delete',
       swipeRightAction: 'important',
       defaultListId: 'work',
+      todaySortMode: 'manual',
     });
     assert.equal(
       normalizeSettings({ defaultListId: 'work' }, new Set(['inbox'])).defaultListId,
@@ -3350,6 +3374,552 @@ async function main() {
       }),
       30000
     );
+  });
+
+  // ---- search -------------------------------------------------------------
+
+  await test('search: glob pattern folds case per character and escapes metacharacters', () => {
+    assert.equal(buildGlobPattern('a*?[]1'), '*[aA][*][?][[]]1*');
+    assert.equal(buildGlobPattern('École'), '*[éÉ][cC][oO][lL][eE]*');
+    assert.equal(buildGlobPattern('ß'), '*ß*');
+    assert.equal(escapeLikePattern('100%_done\\'), '100\\%\\_done\\\\');
+    assert.ok(termPredicate('milk').sql.includes('LIKE'));
+    assert.ok(termPredicate('école').sql.includes('GLOB'));
+    assert.deepEqual(searchTerms('  buy   milk '), ['buy', 'milk']);
+    assert.deepEqual(searchTerms('   '), []);
+    assert.ok(taskMatchesSearch({ title: 'Buy MILK', notes: 'eggs' }, 'milk EGGS'));
+    assert.ok(!taskMatchesSearch({ title: 'Buy milk' }, 'milk eggs'));
+    assert.ok(taskMatchesSearch({ title: 'anything' }, '   '));
+  });
+
+  await test('search: matches title and notes, case-insensitive, every term required', async () => {
+    await freshDb();
+    const milk = await taskRepository.create({ title: 'Buy Milk' });
+    const notes = await taskRepository.create({
+      title: 'Groceries',
+      notes: 'eggs, milk, bread',
+    });
+    await taskRepository.create({ title: 'Call dentist' });
+
+    const one = await searchTasks('milk', { statuses: ['active'] });
+    assert.deepEqual(one.map((t) => t.id).sort(), [milk.id, notes.id].sort());
+
+    const both = await searchTasks('MILK eggs', { statuses: ['active'] });
+    assert.deepEqual(both.map((t) => t.id), [notes.id]);
+
+    assert.deepEqual(await searchTasks('   ', { statuses: ['active'] }), []);
+    assert.deepEqual(await searchTasks('milk', { statuses: [] }), []);
+  });
+
+  await test('search: pattern characters in the query match literally; accents fold case', async () => {
+    await freshDb();
+    const pct = await taskRepository.create({ title: 'Finish 100% of report' });
+    await taskRepository.create({ title: 'Finish 100 of report' });
+    const star = await taskRepository.create({ title: 'rate it 5*' });
+    await taskRepository.create({ title: 'rate it 5x' });
+    const q = await taskRepository.create({ title: 'why? because' });
+    await taskRepository.create({ title: 'whyx because' });
+    const br = await taskRepository.create({ title: 'see [draft]' });
+    await taskRepository.create({ title: 'see draft' });
+    const ecole = await taskRepository.create({ title: 'Inscrire à l’école' });
+    const ids = (tasks: Task[]) => tasks.map((t) => t.id);
+
+    assert.deepEqual(ids(await searchTasks('100%', { statuses: ['active'] })), [pct.id]);
+    assert.deepEqual(ids(await searchTasks('5*', { statuses: ['active'] })), [star.id]);
+    assert.deepEqual(ids(await searchTasks('why?', { statuses: ['active'] })), [q.id]);
+    assert.deepEqual(ids(await searchTasks('[draft]', { statuses: ['active'] })), [br.id]);
+    assert.deepEqual(ids(await searchTasks('ÉCOLE', { statuses: ['active'] })), [ecole.id]);
+    assert.deepEqual(ids(await searchTasks('école', { statuses: ['active'] })), [ecole.id]);
+    // Mixed query: one LIKE term and one GLOB term must both apply.
+    assert.deepEqual(ids(await searchTasks('inscrire ÉCOLE', { statuses: ['active'] })), [ecole.id]);
+    assert.deepEqual(await searchTasks('report ÉCOLE', { statuses: ['active'] }), []);
+  });
+
+  await test('search: scopes by status and list, skips soft-deleted rows', async () => {
+    await freshDb();
+    const errands = await listRepository.create('Errands');
+    const open = await taskRepository.create({ title: 'pay rent' });
+    const inList = await taskRepository.create({ title: 'pay parking', listId: errands.id });
+    const done = await taskRepository.create({ title: 'pay water bill' });
+    await taskRepository.complete(done.id);
+    const archived = await taskRepository.create({ title: 'pay old fine' });
+    await taskRepository.archive(archived.id);
+    const gone = await taskRepository.create({ title: 'pay nothing' });
+    await taskRepository.softDelete(gone.id);
+
+    const ids = (tasks: Task[]) => tasks.map((t) => t.id);
+
+    assert.deepEqual(ids(await searchTasks('pay', { statuses: ['active'] })).sort(), [
+      open.id,
+      inList.id,
+    ].sort());
+    assert.deepEqual(ids(await searchTasks('pay', { statuses: ['completed'] })), [done.id]);
+    assert.deepEqual(ids(await searchTasks('pay', { statuses: ['archived'] })), [archived.id]);
+    assert.deepEqual(
+      ids(await searchTasks('pay', { statuses: ['active'], listId: errands.id })),
+      [inList.id]
+    );
+    assert.deepEqual(
+      ids(await searchTasks('pay', { statuses: ['active'], listId: INBOX_LIST_ID })),
+      [open.id]
+    );
+  });
+
+  await test('search: results group active, then completed newest first, then archived; limit holds', async () => {
+    await freshDb();
+    const db = await getDb();
+    const a1 = await taskRepository.create({ title: 'tag one' });
+    const a2 = await taskRepository.create({ title: 'tag two' });
+    const older = await taskRepository.create({ title: 'tag done older' });
+    const newer = await taskRepository.create({ title: 'tag done newer' });
+    await taskRepository.complete(older.id);
+    await taskRepository.complete(newer.id);
+    // Force a clear ordering regardless of clock resolution.
+    await db.runAsync('UPDATE tasks SET completedAt = ? WHERE id = ?', [
+      '2024-01-01T10:00:00.000Z',
+      older.id,
+    ]);
+    await db.runAsync('UPDATE tasks SET completedAt = ? WHERE id = ?', [
+      '2024-02-01T10:00:00.000Z',
+      newer.id,
+    ]);
+    const arch = await taskRepository.create({ title: 'tag archived' });
+    await taskRepository.archive(arch.id);
+
+    const all = await searchTasks('tag', {
+      statuses: ['completed', 'archived', 'active'],
+    });
+    assert.deepEqual(
+      all.map((t) => t.id),
+      [a1.id, a2.id, newer.id, older.id, arch.id]
+    );
+
+    const capped = await searchTasks('tag', { statuses: ['active'], limit: 1 });
+    assert.equal(capped.length, 1);
+  });
+
+  await test('search: finds completed rows beyond the first history page', async () => {
+    await freshDb();
+    const db = await getDb();
+    const now = Date.now();
+    for (let i = 0; i < 120; i++) {
+      await db.runAsync(
+        `INSERT INTO tasks (id, title, status, priority, recurrence, listId, sortOrder, completedAt, createdAt, updatedAt)
+         VALUES (?, ?, 'completed', 'normal', 'none', ?, 0, ?, ?, ?)`,
+        [
+          `done-${i}`,
+          i === 119 ? 'needle in the past' : `filler ${i}`,
+          INBOX_LIST_ID,
+          new Date(now - i * 60_000).toISOString(),
+          new Date(now - i * 60_000).toISOString(),
+          new Date(now - i * 60_000).toISOString(),
+        ]
+      );
+    }
+    const hits = await searchTasks('needle', { statuses: ['completed'] });
+    assert.deepEqual(hits.map((t) => t.id), ['done-119']);
+  });
+
+  await test('search: recurring occurrences are found in history, the live task stays open', async () => {
+    await freshDb();
+    const live = await taskRepository.create({ title: 'water plants', recurrence: 'daily' });
+    await taskRepository.complete(live.id);
+    await taskRepository.complete(live.id);
+    const open = await searchTasks('water', { statuses: ['active'] });
+    assert.deepEqual(open.map((t) => t.id), [live.id]);
+    const done = await searchTasks('water', { statuses: ['completed'] });
+    assert.equal(done.length, 2);
+    assert.ok(done.every((t) => t.recurringTaskId === live.id));
+  });
+
+  await test('search: a cleared history is hidden during the undo window and back after undo', async () => {
+    await freshDb();
+    const t = await taskRepository.create({ title: 'shred old receipts' });
+    await taskRepository.complete(t.id);
+    const marker = await taskRepository.softDeleteCompleted();
+    assert.deepEqual(await searchTasks('receipts', { statuses: ['completed'] }), []);
+    await taskRepository.restoreClearedCompleted(marker);
+    assert.equal((await searchTasks('receipts', { statuses: ['completed'] })).length, 1);
+    // The undo window closing instead makes the clear permanent.
+    const second = await taskRepository.softDeleteCompleted();
+    await taskRepository.purgeClearedCompleted(second);
+    assert.deepEqual(await searchTasks('receipts', { statuses: ['completed'] }), []);
+  });
+
+  await test('search: tasks of a deleted list are found under Inbox scope', async () => {
+    await freshDb();
+    const list = await listRepository.create('Garage');
+    const t = await taskRepository.create({ title: 'fix bike chain', listId: list.id });
+    await listRepository.delete(list.id);
+    assert.deepEqual(
+      (await searchTasks('bike', { statuses: ['active'], listId: INBOX_LIST_ID })).map((x) => x.id),
+      [t.id]
+    );
+    assert.deepEqual(await searchTasks('bike', { statuses: ['active'], listId: list.id }), []);
+  });
+
+  await test('search: needles at the far end of a max-length title and notes, accents, many terms', async () => {
+    await freshDb();
+    const longTitle = `${'a'.repeat(MAX_TITLE_LENGTH - 6)}needle`;
+    const titled = await taskRepository.create({ title: longTitle });
+    const noted = await taskRepository.create({
+      title: 'plain',
+      notes: `${'b'.repeat(MAX_NOTES_LENGTH - 6)}needle`,
+    });
+    const cafe = await taskRepository.create({ title: 'Café with Zoë' });
+    const many = await taskRepository.create({
+      title: 'alpha bravo charlie',
+      notes: 'delta echo foxtrot',
+    });
+    const archivedNotes = await taskRepository.create({ title: 'misc', notes: 'hidden gem' });
+    await taskRepository.archive(archivedNotes.id);
+
+    const ids = (tasks: Task[]) => tasks.map((t) => t.id).sort();
+    assert.deepEqual(ids(await searchTasks('needle', { statuses: ['active'] })), ids([titled, noted]));
+    assert.deepEqual(ids(await searchTasks('café zoë', { statuses: ['active'] })), [cafe.id]);
+    assert.deepEqual(
+      ids(await searchTasks('foxtrot alpha echo charlie delta bravo', { statuses: ['active'] })),
+      [many.id]
+    );
+    assert.deepEqual(ids(await searchTasks('gem', { statuses: ['archived'] })), [archivedNotes.id]);
+    assert.deepEqual(await searchTasks('gem', { statuses: ['active'] }), []);
+  });
+
+  await test('search: correct at volume (10k rows, long notes) and the limit applies after status order', async () => {
+    await freshDb();
+    const db = await getDb();
+    const now = Date.now();
+    const filler = 'lorem ipsum dolor sit amet '.repeat(40);
+    const expected = { rareActive: 0, rareCompleted: 0, noteOnly: 0 };
+    await db.execAsync('BEGIN');
+    for (let i = 0; i < 10_000; i++) {
+      const completed = i % 2 === 0;
+      if (i % 1000 === 7) expected[completed ? 'rareCompleted' : 'rareActive']++;
+      if (i % 3 === 0 && i % 1000 === 500) expected.noteOnly++;
+      await db.runAsync(
+        `INSERT INTO tasks (id, title, notes, status, priority, recurrence, listId, sortOrder, completedAt, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, 'normal', 'none', ?, ?, ?, ?, ?)`,
+        [
+          `v-${i}`,
+          i % 1000 === 7 ? `rare marker ${i}` : `bulk ${i}`,
+          i % 3 === 0 ? `${filler} ${i % 1000 === 500 ? 'noteonly' : ''}` : null,
+          completed ? 'completed' : 'active',
+          INBOX_LIST_ID,
+          i,
+          completed ? new Date(now - i * 1000).toISOString() : null,
+          new Date(now - i * 1000).toISOString(),
+          new Date(now - i * 1000).toISOString(),
+        ]
+      );
+    }
+    await db.execAsync('COMMIT');
+
+    const t0 = performance.now();
+    const rare = await searchTasks('rare marker', { statuses: ['active', 'completed', 'archived'] });
+    const ms = performance.now() - t0;
+    assert.equal(rare.length, expected.rareActive + expected.rareCompleted);
+    assert.deepEqual(
+      rare.map((t) => t.status),
+      [
+        ...Array(expected.rareActive).fill('active'),
+        ...Array(expected.rareCompleted).fill('completed'),
+      ]
+    );
+    const noteOnly = await searchTasks('noteonly', { statuses: ['active', 'completed'] });
+    assert.equal(noteOnly.length, expected.noteOnly);
+    assert.ok(expected.noteOnly > 0);
+    const bulk = await searchTasks('bulk', { statuses: ['completed', 'active'] });
+    assert.equal(bulk.length, 400, 'the cap applies to each status group');
+    assert.ok(bulk.slice(0, 200).every((t) => t.status === 'active'));
+    assert.ok(bulk.slice(200).every((t) => t.status === 'completed'));
+    console.log(`        (10k rows, two-term search: ${ms.toFixed(1)}ms)`);
+  });
+
+  await test('search: dueFrom keeps only dated tasks on or after the day; date order sorts by due day then list slot', async () => {
+    await freshDb();
+    const undated = await taskRepository.create({ title: 'plan trip' });
+    const today = await taskRepository.create({ title: 'plan today', dueDate: todayDueIso() });
+    const tomorrow = await taskRepository.create({ title: 'plan tomorrow', dueDate: tomorrowIso() });
+    const later = await taskRepository.create({ title: 'plan later', dueDate: dayIso(7) });
+    const laterToo = await taskRepository.create({ title: 'plan later too', dueDate: dayIso(3) });
+    const doneTomorrow = await taskRepository.create({ title: 'plan done', dueDate: tomorrowIso() });
+    await taskRepository.complete(doneTomorrow.id);
+    const from = localDayRangeIso(1).start;
+
+    const upcoming = await searchTasks('plan', { statuses: ['active'], dueFrom: from, activeOrder: 'date' });
+    assert.deepEqual(upcoming.map((t) => t.id), [tomorrow.id, laterToo.id, later.id]);
+    assert.ok(!upcoming.some((t) => t.id === undated.id || t.id === today.id));
+
+    // Default order is the manual list slot, whatever the dates.
+    const listOrder = await searchTasks('plan', { statuses: ['active'], dueFrom: from });
+    assert.deepEqual(listOrder.map((t) => t.id), [tomorrow.id, later.id, laterToo.id]);
+
+    // dueFrom applies to history too.
+    const done = await searchTasks('plan', { statuses: ['completed'], dueFrom: from });
+    assert.deepEqual(done.map((t) => t.id), [doneTomorrow.id]);
+  });
+
+  await test('search: a list sees its own open and finished tasks and nothing from elsewhere', async () => {
+    await freshDb();
+    const groceries = await listRepository.create('Groceries');
+    const open = await taskRepository.create({ title: 'buy oats', listId: groceries.id });
+    const done = await taskRepository.create({ title: 'buy coffee', listId: groceries.id });
+    await taskRepository.complete(done.id);
+    await taskRepository.create({ title: 'buy stamps' });
+    const results = await searchTasks('buy', { statuses: ['active', 'completed'], listId: groceries.id });
+    assert.deepEqual(results.map((t) => [t.id, t.status]), [[open.id, 'active'], [done.id, 'completed']]);
+  });
+
+  await test('settings: todaySortMode persists and falls back to manual when malformed', async () => {
+    await freshDb();
+    assert.equal((await loadSettings()).todaySortMode, 'manual');
+    assert.equal((await updateSetting('todaySortMode', 'alpha')).todaySortMode, 'alpha');
+    assert.equal((await loadSettings()).todaySortMode, 'alpha');
+    assert.equal(normalizeSettings({ todaySortMode: 'bogus' }).todaySortMode, 'manual');
+    assert.equal(normalizeSettings({}).todaySortMode, 'manual');
+  });
+
+  await test('search: hostile and odd queries are harmless and literal', async () => {
+    await freshDb();
+    const db = await getDb();
+    const pct = await taskRepository.create({ title: 'only %' });
+    const star = await taskRepository.create({ title: 'only *' });
+    const open = await taskRepository.create({ title: 'only [' });
+    const close = await taskRepository.create({ title: 'only ]' });
+    const slash = await taskRepository.create({ title: 'path C:\\temp' });
+    const emoji = await taskRepository.create({ title: 'party 🎉 tonight' });
+    const quote = await taskRepository.create({ title: "O'Brien's \"quote\"; --" });
+    const ids = (tasks: Task[]) => tasks.map((t) => t.id);
+    const A = { statuses: ['active'] as const };
+
+    assert.deepEqual(ids(await searchTasks('%', A)), [pct.id]);
+    assert.deepEqual(ids(await searchTasks('*', A)), [star.id]);
+    assert.deepEqual(ids(await searchTasks('[', A)), [open.id]);
+    assert.deepEqual(ids(await searchTasks(']', A)), [close.id]);
+    assert.deepEqual(ids(await searchTasks('\\temp', A)), [slash.id]);
+    assert.deepEqual(ids(await searchTasks('🎉', A)), [emoji.id]);
+    assert.deepEqual(ids(await searchTasks(`O'Brien's`, A)), [quote.id]);
+    assert.deepEqual(ids(await searchTasks(`"quote";`, A)), [quote.id]);
+    assert.deepEqual(await searchTasks("'; DROP TABLE tasks; --", A), []);
+    assert.equal(
+      (await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) c FROM tasks'))!.c,
+      7,
+      'the table survives a SQL-looking query'
+    );
+    // Whitespace of every kind splits terms; a 600-char query is just a miss.
+    assert.deepEqual(ids(await searchTasks('party\n\t tonight', A)), [emoji.id]);
+    assert.deepEqual(await searchTasks('x'.repeat(600), A), []);
+    // Options that make no sense degrade to nothing, not an error.
+    assert.deepEqual(await searchTasks('only', { statuses: ['active'], limit: 0 }), []);
+    assert.deepEqual(await searchTasks('only', { statuses: ['active'], listId: 'no-such-list' }), []);
+    assert.equal(
+      (await searchTasks('only', { statuses: ['active', 'active', 'completed'] })).length,
+      4,
+      'duplicate statuses do not duplicate rows'
+    );
+  });
+
+  await test('reorder: a drag updates sortOrder in the store so a widening list keeps it', async () => {
+    await freshDb();
+    const a = await taskRepository.create({ title: 'drag a', dueDate: todayDueIso() });
+    const b = await taskRepository.create({ title: 'drag b', dueDate: todayDueIso() });
+    const c = await taskRepository.create({ title: 'drag c', dueDate: todayDueIso() });
+    await useTaskStore.getState().refreshToday();
+    await useTaskStore.getState().reorderTasks([c.id, a.id, b.id]);
+    const order = [...useTaskStore.getState().todayTasks]
+      .sort((x, y) => x.sortOrder - y.sortOrder)
+      .map((t) => t.id);
+    assert.deepEqual(order, [c.id, a.id, b.id]);
+    // And the database agrees, so the next refetch cannot disagree with the screen.
+    assert.deepEqual((await fetchTodayTasks()).map((t) => t.id), [c.id, a.id, b.id]);
+  });
+
+  await test('reorder: clearing a filter or search restores the persisted order', () => {
+    const mk = (id: string, sortOrder: number): Task => ({
+      id,
+      title: id,
+      status: 'active',
+      priority: 'normal',
+      recurrence: 'none',
+      sortOrder,
+      createdAt: 'c',
+      updatedAt: 'u',
+    });
+    const all = [mk('A', 0), mk('B', 1), mk('C', 2), mk('D', 3)];
+    // Narrow (a search showed only D), then widen back to the full list.
+    const narrowed = mergeTasksPreservingOrder(all, [all[3]]);
+    assert.deepEqual(narrowed.map((t) => t.id), ['D']);
+    assert.deepEqual(mergeTasksPreservingOrder(narrowed, all).map((t) => t.id), ['A', 'B', 'C', 'D']);
+    // Same membership: a local drag order survives a store refresh.
+    const dragged = [all[1], all[0], all[2], all[3]];
+    assert.deepEqual(mergeTasksPreservingOrder(dragged, all).map((t) => t.id), ['B', 'A', 'C', 'D']);
+    // A row that left (completed) simply drops out.
+    assert.deepEqual(
+      mergeTasksPreservingOrder(dragged, [all[0], all[2], all[3]]).map((t) => t.id),
+      ['A', 'C', 'D']
+    );
+  });
+
+  // ---- useTaskSearch hook ---------------------------------------------------
+
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+  const ACTIVE_ONLY: readonly TaskStatus[] = ['active'];
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  function mountSearch(initialQuery: string) {
+    const seen: TaskSearchState[] = [];
+    let setQuery: (q: string) => void = () => {};
+    function Probe() {
+      const [query, set] = React.useState(initialQuery);
+      setQuery = set;
+      seen.push(useTaskSearch(query, ACTIVE_ONLY));
+      return null;
+    }
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(React.createElement(Probe));
+    });
+    const latest = () => seen[seen.length - 1];
+    const type = async (q: string) => {
+      await act(async () => {
+        setQuery(q);
+      });
+    };
+    const settle = async () => {
+      await act(async () => {
+        await sleep(200);
+      });
+    };
+    return { latest, type, settle, unmount: () => act(() => renderer.unmount()) };
+  }
+
+  await test('hook: changing the scope re-runs at once and drops results that left the scope', async () => {
+    await freshDb();
+    useTaskStore.setState({ revision: 0 });
+    const list = await listRepository.create('Work');
+    await taskRepository.create({ title: 'send invoice', listId: list.id });
+    await taskRepository.create({ title: 'send postcard' });
+    const seen: TaskSearchState[] = [];
+    let setScope: (id: string | undefined) => void = () => {};
+    function Probe() {
+      const [listId, set] = React.useState<string | undefined>(undefined);
+      setScope = set;
+      seen.push(useTaskSearch('send', ACTIVE_ONLY, { listId }));
+      return null;
+    }
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(React.createElement(Probe));
+    });
+    await act(async () => {
+      await sleep(200);
+    });
+    assert.equal(seen[seen.length - 1].results.length, 2);
+    // Commit the scope change first; the effect only runs once act flushes.
+    await act(async () => {
+      setScope(list.id);
+    });
+    await act(async () => {
+      await sleep(30);
+    });
+    assert.deepEqual(seen[seen.length - 1].results.map((t) => t.title), ['send invoice']);
+    assert.equal(seen[seen.length - 1].active, true);
+    act(() => renderer.unmount());
+  });
+
+
+  await test('hook: blank query is idle; typing debounces then settles with results', async () => {
+    await freshDb();
+    useTaskStore.setState({ revision: 0 });
+    await taskRepository.create({ title: 'buy milk' });
+    await taskRepository.create({ title: 'mild salsa' });
+    const probe = mountSearch('');
+    assert.deepEqual(probe.latest(), { results: [], pending: false, active: false });
+
+    await probe.type('mil');
+    assert.equal(probe.latest().pending, true);
+    assert.equal(probe.latest().active, false);
+    await probe.settle();
+    assert.equal(probe.latest().results.length, 2);
+    assert.equal(probe.latest().active, true);
+    assert.equal(probe.latest().pending, false);
+
+    // A new query keeps the old rows visible but marks them as not current.
+    await probe.type('milk');
+    assert.equal(probe.latest().results.length, 2);
+    assert.equal(probe.latest().active, false);
+    await probe.settle();
+    assert.deepEqual(probe.latest().results.map((t) => t.title), ['buy milk']);
+    assert.equal(probe.latest().active, true);
+
+    await probe.type('   ');
+    assert.deepEqual(probe.latest(), { results: [], pending: false, active: false });
+    probe.unmount();
+  });
+
+  await test('hook: fast typing only surfaces the final query', async () => {
+    await freshDb();
+    useTaskStore.setState({ revision: 0 });
+    await taskRepository.create({ title: 'buy milk' });
+    await taskRepository.create({ title: 'mild salsa' });
+    const probe = mountSearch('');
+    const before = probe.latest();
+    await probe.type('m');
+    await act(async () => {
+      await sleep(40);
+    });
+    await probe.type('mi');
+    await act(async () => {
+      await sleep(40);
+    });
+    await probe.type('milk');
+    // Still inside the debounce window: nothing has been fetched yet.
+    assert.equal(probe.latest().results, before.results);
+    await probe.settle();
+    assert.deepEqual(probe.latest().results.map((t) => t.title), ['buy milk']);
+    probe.unmount();
+  });
+
+  await test('hook: a store revision bump re-runs the same query without the debounce', async () => {
+    await freshDb();
+    useTaskStore.setState({ revision: 0 });
+    const a = await taskRepository.create({ title: 'pay rent' });
+    await taskRepository.create({ title: 'pay gas' });
+    const probe = mountSearch('pay');
+    await probe.settle();
+    assert.equal(probe.latest().results.length, 2);
+
+    await taskRepository.softDelete(a.id);
+    await act(async () => {
+      useTaskStore.setState((s) => ({ revision: s.revision + 1 }));
+      await sleep(30);
+    });
+    assert.deepEqual(probe.latest().results.map((t) => t.title), ['pay gas']);
+    assert.equal(probe.latest().active, true);
+    probe.unmount();
+  });
+
+  await test('hook: deleting with undo from results drops the row and undo brings it back', async () => {
+    await freshDb();
+    useTaskStore.setState({ revision: 0 });
+    const a = await taskRepository.create({ title: 'call plumber' });
+    const probe = mountSearch('plumber');
+    await probe.settle();
+    assert.equal(probe.latest().results.length, 1);
+
+    await act(async () => {
+      await useTaskStore.getState().deleteTaskWithUndo(a.id);
+      await sleep(30);
+    });
+    assert.deepEqual(probe.latest().results, []);
+
+    await act(async () => {
+      await pressToastAction();
+      await sleep(30);
+    });
+    assert.equal(probe.latest().results.length, 1);
+    probe.unmount();
   });
 
   await test('theme: every palette meets WCAG AA contrast on the pairs it renders', () => {

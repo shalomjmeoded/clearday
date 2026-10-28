@@ -158,13 +158,17 @@ export function TaskList({
   useEffect(() => {
     const wasReorderMode = prevReorderModeRef.current;
     if (reorderMode && !wasReorderMode) {
-      setManualSortTasks(orderedTasks);
+      // Seed from the current task set, not the last on-screen order alone:
+      // when reorder mode returns right as a search or filter clears, the
+      // stale narrowed order would otherwise become the drag list and a
+      // drop would renumber only that subset.
+      setManualSortTasks(mergeTasksPreservingOrder(orderedTasks, activeTasks));
     }
     if (!reorderMode && wasReorderMode && manualSortTasks.length > 0) {
       setOrderedTasks(manualSortTasks);
     }
     prevReorderModeRef.current = reorderMode;
-  }, [manualSortTasks, orderedTasks, reorderMode]);
+  }, [activeTasks, manualSortTasks, orderedTasks, reorderMode]);
 
   const hideCompleted = behavior === 'hide';
   const collapseCompleted = behavior === 'collapse';
@@ -390,7 +394,8 @@ export function TaskList({
     );
   }
 
-  if (flatListData.length === 0 && visibleCompletedTasks.length === 0) {
+  const completedShown = !hideCompleted && visibleCompletedTasks.length > 0;
+  if (flatListData.length === 0 && !completedShown) {
     return (
       <EmptyState
         message={emptyMessage}
